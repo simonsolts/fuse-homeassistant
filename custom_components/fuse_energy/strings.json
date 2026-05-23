@@ -1,0 +1,20 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Connect Fuse Energy",
+        "description": "Enter your Fuse Energy access token. The auth mechanism is a placeholder while the API is being reverse-engineered.",
+        "data": {
+          "access_token": "Access token"
+        }
+      }
+    },
+    "error": {
+      "cannot_connect": "Failed to connect to Fuse Energy.",
+      "invalid_auth": "The access token was rejected."
+    },
+    "abort": {
+      "single_instance_allowed": "Only one Fuse Energy account can be configured."
+    }
+  }
+}
