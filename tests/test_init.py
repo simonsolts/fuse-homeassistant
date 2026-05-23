@@ -45,3 +45,66 @@ def test_const_exposes_new_config_keys_and_stat_templates() -> None:
     assert const.STAT_ID_COST_TEMPLATE == "fuse_energy:elec_cost_{premises_fid}"
 
     assert isinstance(const.FALLBACK_APP_VERSION, str) and const.FALLBACK_APP_VERSION
+
+
+import pytest
+from datetime import date
+from decimal import Decimal
+from unittest.mock import patch as _patch
+from unittest.mock import MagicMock
+
+import aiohttp
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.fuse_energy.api import HourlyBar
+from custom_components.fuse_energy.const import (
+    CONF_APP_AUTH,
+    CONF_PREMISES_FID,
+    CONF_SESSION_ID,
+    DOMAIN,
+)
+
+
+_DATA = {CONF_SESSION_ID: "sid", CONF_APP_AUTH: "aa", CONF_PREMISES_FID: "pfid"}
+
+
+async def test_setup_and_unload_entry(
+    recorder_mock, hass: HomeAssistant, auto_enable_custom_integrations
+) -> None:
+    entry = MockConfigEntry(
+        domain=DOMAIN, data=_DATA, unique_id="fuse_energy_singleton"
+    )
+    entry.add_to_hass(hass)
+
+    fake_session = MagicMock(spec=aiohttp.ClientSession)
+
+    bar = HourlyBar(
+        local_date=date.today(),
+        local_hour=0,
+        kwh=Decimal("0.5"),
+        cost_gbp=Decimal("0.05"),
+        is_realised=True,
+    )
+
+    with (
+        _patch(
+            "custom_components.fuse_energy.aiohttp_client.async_get_clientsession",
+            return_value=fake_session,
+        ),
+        _patch(
+            "custom_components.fuse_energy.api.FuseEnergyApiClient.async_fetch_day",
+            return_value=[bar],
+        ),
+    ):
+        assert await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+        assert entry.state == ConfigEntryState.LOADED
+
+        entities = hass.states.async_entity_ids("sensor")
+        assert sum("fuse_energy" in eid for eid in entities) >= 2
+
+        assert await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
+        assert entry.state == ConfigEntryState.NOT_LOADED

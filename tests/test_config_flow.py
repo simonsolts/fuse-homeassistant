@@ -1,8 +1,10 @@
 """Tests for the Fuse Energy config flow."""
 from __future__ import annotations
 
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
+import aiohttp
+import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
@@ -26,6 +28,23 @@ _VALID_INPUT = {
 }
 
 
+@pytest.fixture(autouse=True)
+def mock_aiohttp_session():
+    """Prevent the real aiohttp session (and its c-ares DNS thread) from starting."""
+    fake = MagicMock(spec=aiohttp.ClientSession)
+    with (
+        patch(
+            "custom_components.fuse_energy.config_flow.aiohttp_client.async_get_clientsession",
+            return_value=fake,
+        ),
+        patch(
+            "custom_components.fuse_energy.aiohttp_client.async_get_clientsession",
+            return_value=fake,
+        ),
+    ):
+        yield
+
+
 async def test_user_step_form_shown(
     hass: HomeAssistant, auto_enable_custom_integrations
 ) -> None:
@@ -39,9 +58,14 @@ async def test_user_step_form_shown(
 async def test_successful_submission_creates_entry(
     hass: HomeAssistant, auto_enable_custom_integrations
 ) -> None:
-    with patch(
-        "custom_components.fuse_energy.config_flow.FuseEnergyApiClient.async_fetch_day",
-        return_value=[],
+    with (
+        patch(
+            "custom_components.fuse_energy.config_flow.FuseEnergyApiClient.async_fetch_day",
+            return_value=[],
+        ),
+        patch(
+            "custom_components.fuse_energy.coordinator.FuseEnergyDataUpdateCoordinator.async_config_entry_first_refresh",
+        ),
     ):
         first = await hass.config_entries.flow.async_init(
             DOMAIN, context={"source": "user"}
