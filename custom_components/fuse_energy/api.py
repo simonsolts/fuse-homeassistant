@@ -20,11 +20,11 @@ from urllib.parse import quote
 
 import aiohttp
 
-from .const import FUSE_BASE_URL
+from .const import FUSE_BASE_URL, FUSE_TRPC_PATH
 from .version_resolver import AppVersionResolver
 
 _LOGGER = logging.getLogger(__name__)
-_FETCH_PATH = "/api/trpc/premisesDisplayData"
+_FETCH_PATH = f"{FUSE_TRPC_PATH}/premisesDisplayData"
 
 
 class FuseEnergyApiError(Exception):
@@ -79,6 +79,9 @@ class FuseEnergyApiClient:
         try:
             return await self._fetch_once(local_date)
         except _StalledUIError:
+            _LOGGER.warning(
+                "Cached x-fuse-app-version is stale; refreshing version and retrying."
+            )
             self._version_resolver.invalidate()
             try:
                 return await self._fetch_once(local_date)
@@ -113,7 +116,7 @@ class FuseEnergyApiClient:
                 payload = await resp.json()
                 if resp.status == 200:
                     return _parse_bars(payload, local_date)
-                _classify_error(payload, resp.status)
+                _classify_error(payload)
                 raise FuseEnergyApiError(
                     f"unexpected HTTP {resp.status} from Fuse: {payload}"
                 )
@@ -125,7 +128,7 @@ class _StalledUIError(Exception):
     """Internal marker for ____reloadRequired:true responses."""
 
 
-def _classify_error(payload: dict, status: int) -> None:
+def _classify_error(payload: dict) -> None:
     """Raise the right exception class based on the tRPC error envelope."""
     data = ((payload or {}).get("error") or {}).get("data") or {}
     if data.get("____signOutRequired"):

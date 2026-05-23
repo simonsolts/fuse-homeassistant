@@ -58,7 +58,6 @@ def _resp(status: int, json_body) -> MagicMock:
     resp = MagicMock()
     resp.status = status
     resp.json = AsyncMock(return_value=json_body)
-    resp.text = AsyncMock(return_value=json.dumps(json_body))
     resp.__aenter__ = AsyncMock(return_value=resp)
     resp.__aexit__ = AsyncMock(return_value=False)
     return resp
@@ -203,8 +202,9 @@ async def test_unexpected_500_raises_api_error() -> None:
     session.get = MagicMock(return_value=_resp(500, {"error": {"data": {"httpStatus": 500}}}))
     client = _make_client_with_session(session)
 
-    with pytest.raises(FuseEnergyApiError):
+    with pytest.raises(FuseEnergyApiError) as exc_info:
         await client.async_fetch_day(date(2026, 5, 21))
+    assert type(exc_info.value) is FuseEnergyApiError
 
 
 async def test_network_error_raises_api_error() -> None:
