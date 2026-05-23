@@ -27,11 +27,7 @@ from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 
 from .api import HourlyBar
-from .const import (
-    DOMAIN,
-    STAT_ID_CONSUMPTION_TEMPLATE,
-    STAT_ID_COST_TEMPLATE,
-)
+from .const import DOMAIN, stat_id_consumption, stat_id_cost
 
 _FUSE_TZ = ZoneInfo("Europe/London")
 
@@ -50,8 +46,8 @@ async def async_import_hourly_bars(
     if not realised:
         return
 
-    kwh_stat_id = STAT_ID_CONSUMPTION_TEMPLATE.format(premises_fid=premises_fid)
-    cost_stat_id = STAT_ID_COST_TEMPLATE.format(premises_fid=premises_fid)
+    kwh_stat_id = stat_id_consumption(premises_fid)
+    cost_stat_id = stat_id_cost(premises_fid)
 
     await _import_series(
         hass,

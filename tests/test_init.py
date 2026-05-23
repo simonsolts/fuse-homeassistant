@@ -38,7 +38,7 @@ def test_manifest_is_valid_json_with_required_keys() -> None:
     assert manifest["name"] == "Fuse Energy"
     assert manifest["config_flow"] is True
     assert manifest["iot_class"] == "cloud_polling"
-    assert manifest["version"] == "0.0.1"
+    assert manifest["version"] == "0.0.2"
     assert manifest["codeowners"] == []
 
 
@@ -57,8 +57,11 @@ def test_const_exposes_new_config_keys_and_stat_templates() -> None:
     assert const.FUSE_BASE_URL == "https://www.fuseenergy.com"
     assert const.FUSE_TRPC_PATH == "/api/trpc"
 
-    assert const.STAT_ID_CONSUMPTION_TEMPLATE == "fuse_energy:elec_consumption_{premises_fid}"
-    assert const.STAT_ID_COST_TEMPLATE == "fuse_energy:elec_cost_{premises_fid}"
+    # UUID-format fids contain hyphens which are invalid in HA statistic_ids;
+    # the helpers must sanitize them to underscores.
+    fid = "abc12345-1234-1234-1234-abcdef123456"
+    assert const.stat_id_consumption(fid) == "fuse_energy:elec_consumption_abc12345_1234_1234_1234_abcdef123456"
+    assert const.stat_id_cost(fid) == "fuse_energy:elec_cost_abc12345_1234_1234_1234_abcdef123456"
 
     assert isinstance(const.FALLBACK_APP_VERSION, str) and const.FALLBACK_APP_VERSION
 

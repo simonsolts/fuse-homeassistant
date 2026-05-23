@@ -21,11 +21,7 @@ from .api import (
     FuseEnergyApiError,
     HourlyBar,
 )
-from .const import (
-    DEFAULT_SCAN_INTERVAL,
-    DOMAIN,
-    STAT_ID_CONSUMPTION_TEMPLATE,
-)
+from .const import DEFAULT_SCAN_INTERVAL, DOMAIN, stat_id_consumption
 from .statistics import async_import_hourly_bars
 
 _LOGGER = logging.getLogger(__name__)
@@ -103,7 +99,7 @@ async def _async_last_imported_date(
     hass: HomeAssistant, premises_fid: str
 ) -> date | None:
     """Return the local-date of the most recent imported consumption hour."""
-    statistic_id = STAT_ID_CONSUMPTION_TEMPLATE.format(premises_fid=premises_fid)
+    statistic_id = stat_id_consumption(premises_fid)
     last = await get_instance(hass).async_add_executor_job(
         get_last_statistics, hass, 1, statistic_id, True, set()
     )

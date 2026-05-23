@@ -14,8 +14,17 @@ CONF_PREMISES_FID: str = "premises_fid"
 FUSE_BASE_URL: str = "https://www.fuseenergy.com"
 FUSE_TRPC_PATH: str = "/api/trpc"
 
-STAT_ID_CONSUMPTION_TEMPLATE: str = "fuse_energy:elec_consumption_{premises_fid}"
-STAT_ID_COST_TEMPLATE: str = "fuse_energy:elec_cost_{premises_fid}"
+def _stat_object_id_suffix(premises_fid: str) -> str:
+    # HA statistic_id object_ids must match [a-z0-9_]+; UUIDs contain hyphens.
+    return premises_fid.replace("-", "_")
+
+
+def stat_id_consumption(premises_fid: str) -> str:
+    return f"{DOMAIN}:elec_consumption_{_stat_object_id_suffix(premises_fid)}"
+
+
+def stat_id_cost(premises_fid: str) -> str:
+    return f"{DOMAIN}:elec_cost_{_stat_object_id_suffix(premises_fid)}"
 
 FALLBACK_APP_VERSION: str = "5.310"
 

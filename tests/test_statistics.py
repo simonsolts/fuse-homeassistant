@@ -17,14 +17,12 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
 )
 
 from custom_components.fuse_energy.api import HourlyBar
-from custom_components.fuse_energy.const import (
-    STAT_ID_CONSUMPTION_TEMPLATE,
-    STAT_ID_COST_TEMPLATE,
-)
+from custom_components.fuse_energy.const import stat_id_consumption, stat_id_cost
 from custom_components.fuse_energy.statistics import async_import_hourly_bars
 
 
 LDN = ZoneInfo("Europe/London")
+PFID = "abc12345-1234-1234-1234-abcdef123456"
 
 
 def _bar(hour: int, kwh: str, cost: str, *, realised: bool = True) -> HourlyBar:
@@ -47,11 +45,11 @@ async def test_imports_realised_hours_with_cumulative_sum(
 ) -> None:
     bars = [_bar(0, "0.1", "0.01"), _bar(1, "0.2", "0.02"), _bar(2, "0.3", "0.03")]
 
-    await async_import_hourly_bars(hass, "pfid", bars)
+    await async_import_hourly_bars(hass, PFID, bars)
     await async_wait_recording_done(hass)
 
-    kwh_id = STAT_ID_CONSUMPTION_TEMPLATE.format(premises_fid="pfid")
-    cost_id = STAT_ID_COST_TEMPLATE.format(premises_fid="pfid")
+    kwh_id = stat_id_consumption(PFID)
+    cost_id = stat_id_cost(PFID)
 
     rows = await get_instance(hass).async_add_executor_job(
         statistics_during_period,
@@ -78,10 +76,10 @@ async def test_skips_forecast_bars(recorder_mock, hass: HomeAssistant) -> None:
         _bar(1, "0.2", "0.02", realised=False),
     ]
 
-    await async_import_hourly_bars(hass, "pfid", bars)
+    await async_import_hourly_bars(hass, PFID, bars)
     await async_wait_recording_done(hass)
 
-    kwh_id = STAT_ID_CONSUMPTION_TEMPLATE.format(premises_fid="pfid")
+    kwh_id = stat_id_consumption(PFID)
     last = await get_instance(hass).async_add_executor_job(
         get_last_statistics, hass, 5, kwh_id, True, {"sum", "state"}
     )
@@ -92,15 +90,15 @@ async def test_skips_forecast_bars(recorder_mock, hass: HomeAssistant) -> None:
 async def test_resumes_from_last_recorded_sum(
     recorder_mock, hass: HomeAssistant
 ) -> None:
-    await async_import_hourly_bars(hass, "pfid", [_bar(0, "0.5", "0.05")])
+    await async_import_hourly_bars(hass, PFID, [_bar(0, "0.5", "0.05")])
     await async_wait_recording_done(hass)
 
     await async_import_hourly_bars(
-        hass, "pfid", [_bar(0, "0.5", "0.05"), _bar(1, "0.4", "0.04")]
+        hass, PFID, [_bar(0, "0.5", "0.05"), _bar(1, "0.4", "0.04")]
     )
     await async_wait_recording_done(hass)
 
-    kwh_id = STAT_ID_CONSUMPTION_TEMPLATE.format(premises_fid="pfid")
+    kwh_id = stat_id_consumption(PFID)
     last = await get_instance(hass).async_add_executor_job(
         get_last_statistics, hass, 5, kwh_id, True, {"sum"}
     )
@@ -109,10 +107,10 @@ async def test_resumes_from_last_recorded_sum(
 
 
 async def test_empty_bars_is_noop(recorder_mock, hass: HomeAssistant) -> None:
-    await async_import_hourly_bars(hass, "pfid", [])
+    await async_import_hourly_bars(hass, PFID, [])
     await async_wait_recording_done(hass)
 
-    kwh_id = STAT_ID_CONSUMPTION_TEMPLATE.format(premises_fid="pfid")
+    kwh_id = stat_id_consumption(PFID)
     last = await get_instance(hass).async_add_executor_job(
         get_last_statistics, hass, 1, kwh_id, True, {"sum"}
     )
