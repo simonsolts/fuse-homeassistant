@@ -1,133 +1,98 @@
 """Tests for the Fuse Energy config flow."""
 from __future__ import annotations
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import patch
 
-import pytest
-from homeassistant import config_entries, data_entry_flow
 from homeassistant.core import HomeAssistant
+from homeassistant.data_entry_flow import FlowResultType
+from pytest_homeassistant_custom_component.common import MockConfigEntry
 
-from custom_components.fuse_energy.const import CONF_ACCESS_TOKEN, DOMAIN
-
-
-@pytest.fixture(name="mock_client")
-def mock_client_fixture():
-    """Patch the FuseEnergyApiClient used inside the config flow.
-
-    Also patches ``aiohttp_client.async_get_clientsession`` at the config flow's
-    namespace so the flow doesn't spin up a real aiohttp/pycares session (which
-    would leave a lingering daemon thread and trip the test runner's leak check).
-    """
-    with patch(
-        "custom_components.fuse_energy.config_flow.FuseEnergyApiClient",
-        autospec=True,
-    ) as mock_cls, patch(
-        "custom_components.fuse_energy.config_flow.aiohttp_client.async_get_clientsession"
-    ) as mock_session:
-        mock_session.return_value = object()
-        instance = mock_cls.return_value
-        instance.async_get_data = AsyncMock(return_value=None)
-        yield instance
+from custom_components.fuse_energy.const import (
+    CONF_APP_AUTH,
+    CONF_PREMISES_FID,
+    CONF_SESSION_ID,
+    DOMAIN,
+)
 
 
-async def test_user_flow_happy_path(
-    hass: HomeAssistant, auto_enable_custom_integrations, mock_client
+_VALID_INPUT = {
+    CONF_SESSION_ID: "sid",
+    CONF_APP_AUTH: "aa",
+    CONF_PREMISES_FID: "pfid",
+}
+
+
+async def test_user_step_form_shown(
+    hass: HomeAssistant, auto_enable_custom_integrations
 ) -> None:
     result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
+        DOMAIN, context={"source": "user"}
     )
-    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    assert result["type"] == FlowResultType.FORM
     assert result["step_id"] == "user"
-    assert result["errors"] in (None, {})
 
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        user_input={CONF_ACCESS_TOKEN: "valid-token"},
-    )
 
-    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
+async def test_successful_submission_creates_entry(
+    hass: HomeAssistant, auto_enable_custom_integrations
+) -> None:
+    with patch(
+        "custom_components.fuse_energy.config_flow.FuseEnergyApiClient.async_fetch_day",
+        return_value=[],
+    ):
+        first = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "user"}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            first["flow_id"], user_input=_VALID_INPUT,
+        )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
     assert result["title"] == "Fuse Energy"
-    assert result["data"] == {CONF_ACCESS_TOKEN: "valid-token"}
+    assert result["data"] == _VALID_INPUT
 
 
-async def test_user_flow_invalid_auth(
-    hass: HomeAssistant, auto_enable_custom_integrations, mock_client
+async def test_invalid_auth_surfaces_field_error(
+    hass: HomeAssistant, auto_enable_custom_integrations
 ) -> None:
     from custom_components.fuse_energy.api import FuseEnergyApiAuthError
-
-    mock_client.async_get_data.side_effect = FuseEnergyApiAuthError("nope")
-
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        user_input={CONF_ACCESS_TOKEN: "bad-token"},
-    )
-
-    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    with patch(
+        "custom_components.fuse_energy.config_flow.FuseEnergyApiClient.async_fetch_day",
+        side_effect=FuseEnergyApiAuthError("bad"),
+    ):
+        first = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "user"}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            first["flow_id"], user_input=_VALID_INPUT,
+        )
+    assert result["type"] == FlowResultType.FORM
     assert result["errors"] == {"base": "invalid_auth"}
 
 
-async def test_user_flow_cannot_connect(
-    hass: HomeAssistant, auto_enable_custom_integrations, mock_client
+async def test_network_error_surfaces_cannot_connect(
+    hass: HomeAssistant, auto_enable_custom_integrations
 ) -> None:
     from custom_components.fuse_energy.api import FuseEnergyApiError
-
-    mock_client.async_get_data.side_effect = FuseEnergyApiError("boom")
-
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        user_input={CONF_ACCESS_TOKEN: "any-token"},
-    )
-
-    assert result["type"] == data_entry_flow.FlowResultType.FORM
+    with patch(
+        "custom_components.fuse_energy.config_flow.FuseEnergyApiClient.async_fetch_day",
+        side_effect=FuseEnergyApiError("boom"),
+    ):
+        first = await hass.config_entries.flow.async_init(
+            DOMAIN, context={"source": "user"}
+        )
+        result = await hass.config_entries.flow.async_configure(
+            first["flow_id"], user_input=_VALID_INPUT,
+        )
+    assert result["type"] == FlowResultType.FORM
     assert result["errors"] == {"base": "cannot_connect"}
 
 
-async def test_user_flow_rejects_duplicate_entry(
-    hass: HomeAssistant, auto_enable_custom_integrations, mock_client
+async def test_single_instance_blocks_second_entry(
+    hass: HomeAssistant, auto_enable_custom_integrations
 ) -> None:
-    """Adding the integration twice should abort with single_instance_allowed."""
-    # First entry — succeeds
+    MockConfigEntry(domain=DOMAIN, data=_VALID_INPUT, unique_id="fuse_energy_singleton").add_to_hass(hass)
     result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
+        DOMAIN, context={"source": "user"}
     )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        user_input={CONF_ACCESS_TOKEN: "valid-token"},
-    )
-    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY
-
-    # Second entry — should abort
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-    assert result["type"] == data_entry_flow.FlowResultType.ABORT
+    assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "single_instance_allowed"
-
-
-async def test_stub_NotImplementedError_does_not_block_setup(
-    hass: HomeAssistant, auto_enable_custom_integrations, mock_client
-) -> None:
-    """While the API is stubbed, NotImplementedError must not prevent entry creation.
-
-    Rationale: until reverse-engineering lands, the API client raises
-    NotImplementedError on every call. The config flow treats that as
-    'accepted' so users can still add the integration and watch it fail
-    visibly via UpdateFailed.
-    """
-    mock_client.async_get_data.side_effect = NotImplementedError("stub")
-
-    result = await hass.config_entries.flow.async_init(
-        DOMAIN, context={"source": config_entries.SOURCE_USER}
-    )
-    result = await hass.config_entries.flow.async_configure(
-        result["flow_id"],
-        user_input={CONF_ACCESS_TOKEN: "valid-token"},
-    )
-
-    assert result["type"] == data_entry_flow.FlowResultType.CREATE_ENTRY

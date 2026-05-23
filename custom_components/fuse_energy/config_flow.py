@@ -1,8 +1,9 @@
 """Config flow for the Fuse Energy integration."""
 from __future__ import annotations
 
-import logging
+from datetime import datetime
 from typing import Any
+from zoneinfo import ZoneInfo
 
 import voluptuous as vol
 from homeassistant import config_entries
@@ -14,25 +15,33 @@ from .api import (
     FuseEnergyApiClient,
     FuseEnergyApiError,
 )
-from .const import CONF_ACCESS_TOKEN, DOMAIN
-
-_LOGGER = logging.getLogger(__name__)
+from .const import (
+    CONF_APP_AUTH,
+    CONF_PREMISES_FID,
+    CONF_SESSION_ID,
+    DOMAIN,
+)
 
 _UNIQUE_ID = "fuse_energy_singleton"
+_FUSE_TZ = ZoneInfo("Europe/London")
 
-_USER_SCHEMA = vol.Schema({vol.Required(CONF_ACCESS_TOKEN): str})
+_USER_SCHEMA = vol.Schema(
+    {
+        vol.Required(CONF_SESSION_ID): str,
+        vol.Required(CONF_APP_AUTH): str,
+        vol.Required(CONF_PREMISES_FID): str,
+    }
+)
 
 
 class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+    """Handle the config flow for Fuse Energy."""
+
     VERSION = 1
 
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None
     ) -> FlowResult:
-        # Enforce a single instance of this integration. Using
-        # ``_async_current_entries`` (rather than unique_id) lets us return the
-        # canonical ``single_instance_allowed`` abort reason that HA's frontend
-        # surfaces with a translated message.
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
@@ -42,24 +51,24 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         errors: dict[str, str] = {}
 
         if user_input is not None:
-            token = user_input[CONF_ACCESS_TOKEN]
             session = aiohttp_client.async_get_clientsession(self.hass)
-            client = FuseEnergyApiClient(session=session, access_token=token)
+            client = FuseEnergyApiClient(
+                session=session,
+                session_id=user_input[CONF_SESSION_ID],
+                app_auth=user_input[CONF_APP_AUTH],
+                premises_fid=user_input[CONF_PREMISES_FID],
+            )
             try:
-                await client.async_get_data()
+                await client.async_fetch_day(datetime.now(_FUSE_TZ).date())
             except FuseEnergyApiAuthError:
                 errors["base"] = "invalid_auth"
             except FuseEnergyApiError:
                 errors["base"] = "cannot_connect"
-            except NotImplementedError:
-                # TODO: while the API is stubbed, accept the token unconditionally.
-                # Replace this branch with real validation once the API is wired up.
-                pass
 
             if not errors:
                 return self.async_create_entry(
                     title="Fuse Energy",
-                    data={CONF_ACCESS_TOKEN: token},
+                    data=dict(user_input),
                 )
 
         return self.async_show_form(
