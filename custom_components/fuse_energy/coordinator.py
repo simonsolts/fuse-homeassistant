@@ -73,20 +73,28 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
             # Refetch the last imported day so any newly-realised hours arrive.
             start = last_imported
 
-        latest_realised: HourlyBar | None = None
+        # Collect all bars across the range and import in a single call so the
+        # writer's running_sum stays continuous. Importing per-day races with
+        # the recorder's async write queue and resets running_sum at each day
+        # boundary, producing big negative bars at midnight in the Energy
+        # dashboard.
+        all_bars: list[HourlyBar] = []
         day = start
         while day <= today:
-            bars = await self._client.async_fetch_day(day)
-            if bars:
-                await async_import_hourly_bars(self.hass, self._premises_fid, bars)
-                for bar in bars:
-                    if bar.is_realised and (
-                        latest_realised is None
-                        or (bar.local_date, bar.local_hour)
-                        > (latest_realised.local_date, latest_realised.local_hour)
-                    ):
-                        latest_realised = bar
+            all_bars.extend(await self._client.async_fetch_day(day))
             day += timedelta(days=1)
+
+        if all_bars:
+            await async_import_hourly_bars(self.hass, self._premises_fid, all_bars)
+
+        latest_realised: HourlyBar | None = None
+        for bar in all_bars:
+            if bar.is_realised and (
+                latest_realised is None
+                or (bar.local_date, bar.local_hour)
+                > (latest_realised.local_date, latest_realised.local_hour)
+            ):
+                latest_realised = bar
         if latest_realised is None:
             return self.data
         return FuseEnergySnapshot(
