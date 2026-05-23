@@ -1,6 +1,28 @@
 """Smoke tests for custom_components.fuse_energy."""
 from __future__ import annotations
 
+import importlib.util
+import json
+from datetime import date
+from decimal import Decimal
+from pathlib import Path
+from unittest.mock import MagicMock, patch
+
+import aiohttp
+from homeassistant.config_entries import ConfigEntryState
+from homeassistant.core import HomeAssistant
+from pytest_homeassistant_custom_component.common import MockConfigEntry
+
+from custom_components.fuse_energy.api import HourlyBar
+from custom_components.fuse_energy.const import (
+    CONF_APP_AUTH,
+    CONF_PREMISES_FID,
+    CONF_SESSION_ID,
+    DOMAIN,
+)
+
+_DATA = {CONF_SESSION_ID: "sid", CONF_APP_AUTH: "aa", CONF_PREMISES_FID: "pfid"}
+
 
 def test_const_exposes_domain() -> None:
     from custom_components.fuse_energy.const import DOMAIN
@@ -9,9 +31,6 @@ def test_const_exposes_domain() -> None:
 
 
 def test_manifest_is_valid_json_with_required_keys() -> None:
-    import json
-    from pathlib import Path
-
     manifest_path = Path("custom_components/fuse_energy/manifest.json")
     manifest = json.loads(manifest_path.read_text())
 
@@ -24,9 +43,6 @@ def test_manifest_is_valid_json_with_required_keys() -> None:
 
 
 def test_const_exposes_new_config_keys_and_stat_templates() -> None:
-    import importlib.util
-    from pathlib import Path
-
     spec = importlib.util.spec_from_file_location(
         "fuse_const",
         Path(__file__).parent.parent / "custom_components/fuse_energy/const.py",
@@ -45,29 +61,6 @@ def test_const_exposes_new_config_keys_and_stat_templates() -> None:
     assert const.STAT_ID_COST_TEMPLATE == "fuse_energy:elec_cost_{premises_fid}"
 
     assert isinstance(const.FALLBACK_APP_VERSION, str) and const.FALLBACK_APP_VERSION
-
-
-import pytest
-from datetime import date
-from decimal import Decimal
-from unittest.mock import patch as _patch
-from unittest.mock import MagicMock
-
-import aiohttp
-from homeassistant.config_entries import ConfigEntryState
-from homeassistant.core import HomeAssistant
-from pytest_homeassistant_custom_component.common import MockConfigEntry
-
-from custom_components.fuse_energy.api import HourlyBar
-from custom_components.fuse_energy.const import (
-    CONF_APP_AUTH,
-    CONF_PREMISES_FID,
-    CONF_SESSION_ID,
-    DOMAIN,
-)
-
-
-_DATA = {CONF_SESSION_ID: "sid", CONF_APP_AUTH: "aa", CONF_PREMISES_FID: "pfid"}
 
 
 async def test_setup_and_unload_entry(
@@ -89,11 +82,11 @@ async def test_setup_and_unload_entry(
     )
 
     with (
-        _patch(
+        patch(
             "custom_components.fuse_energy.aiohttp_client.async_get_clientsession",
             return_value=fake_session,
         ),
-        _patch(
+        patch(
             "custom_components.fuse_energy.api.FuseEnergyApiClient.async_fetch_day",
             return_value=[bar],
         ),
@@ -103,7 +96,7 @@ async def test_setup_and_unload_entry(
         assert entry.state == ConfigEntryState.LOADED
 
         entities = hass.states.async_entity_ids("sensor")
-        assert sum("fuse_energy" in eid for eid in entities) >= 2
+        assert sum("fuse_energy" in eid for eid in entities) == 2
 
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
