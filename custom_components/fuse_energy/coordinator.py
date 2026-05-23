@@ -37,7 +37,6 @@ _INITIAL_BACKFILL_DAYS = 30
 class FuseEnergySnapshot:
     """Sensor-facing view: the most recent realised hour we've seen."""
 
-    last_hour_local: datetime
     last_hour_kwh: float
     last_hour_cost_gbp: float
 
@@ -75,6 +74,7 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
         if last_imported is None:
             start = today - timedelta(days=_INITIAL_BACKFILL_DAYS)
         else:
+            # Refetch the last imported day so any newly-realised hours arrive.
             start = last_imported
 
         latest_realised: HourlyBar | None = None
@@ -94,13 +94,6 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
         if latest_realised is None:
             return self.data
         return FuseEnergySnapshot(
-            last_hour_local=datetime(
-                latest_realised.local_date.year,
-                latest_realised.local_date.month,
-                latest_realised.local_date.day,
-                latest_realised.local_hour,
-                tzinfo=_FUSE_TZ,
-            ),
             last_hour_kwh=float(latest_realised.kwh),
             last_hour_cost_gbp=float(latest_realised.cost_gbp),
         )
