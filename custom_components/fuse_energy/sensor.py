@@ -1,17 +1,17 @@
 """Sensor platform for the Fuse Energy integration.
 
-Both sensors use ``SensorStateClass.MEASUREMENT``. The long-term hourly
+Both sensors omit ``state_class`` on purpose. The long-term hourly
 statistics that show up on the Energy dashboard / Statistics card come
 from the writer in ``statistics.py`` — not from these entities — so we
-deliberately don't use ``TOTAL_INCREASING`` (which would generate
-conflicting auto-statistics on the same series).
+don't want HA to auto-generate statistics from these display sensors.
+HA also rejects ``MEASUREMENT`` paired with the ``energy`` /
+``monetary`` device classes.
 """
 from __future__ import annotations
 
 from homeassistant.components.sensor import (
     SensorDeviceClass,
     SensorEntity,
-    SensorStateClass,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import UnitOfEnergy
@@ -66,7 +66,6 @@ class _FuseEnergyBaseSensor(
 class FuseEnergyLastHourEnergySensor(_FuseEnergyBaseSensor):
     _attr_name = "Last hour energy"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
 
     def __init__(
@@ -86,7 +85,6 @@ class FuseEnergyLastHourEnergySensor(_FuseEnergyBaseSensor):
 class FuseEnergyLastHourCostSensor(_FuseEnergyBaseSensor):
     _attr_name = "Last hour cost"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = "GBP"
 
     def __init__(

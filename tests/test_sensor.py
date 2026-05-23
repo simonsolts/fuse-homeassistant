@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock
 
-from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
+from homeassistant.components.sensor import SensorDeviceClass
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
 
@@ -36,7 +36,7 @@ async def test_energy_sensor_attributes_when_data_present(hass: HomeAssistant) -
     assert sensor.native_value == 0.5
     assert sensor.native_unit_of_measurement == UnitOfEnergy.KILO_WATT_HOUR
     assert sensor.device_class == SensorDeviceClass.ENERGY
-    assert sensor.state_class == SensorStateClass.MEASUREMENT
+    assert sensor.state_class is None
     assert sensor.unique_id == "entry-1_last_hour_kwh"
     assert sensor.available is True
 
@@ -52,7 +52,7 @@ async def test_cost_sensor_attributes_when_data_present(hass: HomeAssistant) -> 
     assert sensor.native_value == 0.1
     assert sensor.native_unit_of_measurement == "GBP"
     assert sensor.device_class == SensorDeviceClass.MONETARY
-    assert sensor.state_class == SensorStateClass.MEASUREMENT
+    assert sensor.state_class is None
     assert sensor.unique_id == "entry-1_last_hour_cost"
     assert sensor.available is True
 
