@@ -14,14 +14,13 @@ from .api import (
     FuseEnergyApiAuthError,
     FuseEnergyApiClient,
     FuseEnergyApiError,
-    FuseEnergyData,
 )
 from .const import DEFAULT_SCAN_INTERVAL, DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
 
-class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergyData]):
+class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator):  # rewritten in Task 6
     """Polls the Fuse Energy API and serves a FuseEnergyData snapshot."""
 
     def __init__(
@@ -37,7 +36,7 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergyData]):
         )
         self._client = client
 
-    async def _async_update_data(self) -> FuseEnergyData:
+    async def _async_update_data(self):
         try:
             return await self._client.async_get_data()
         except FuseEnergyApiAuthError as err:

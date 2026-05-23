@@ -15,9 +15,11 @@ _PLATFORMS: list[Platform] = [Platform.SENSOR]
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     session = aiohttp_client.async_get_clientsession(hass)
-    client = FuseEnergyApiClient(
+    client = FuseEnergyApiClient(  # fully wired in Task 10
         session=session,
-        access_token=entry.data[CONF_SESSION_ID],
+        session_id=entry.data.get(CONF_SESSION_ID, ""),
+        app_auth="",
+        premises_fid="",
     )
     coordinator = FuseEnergyDataUpdateCoordinator(hass, client)
     await coordinator.async_config_entry_first_refresh()
