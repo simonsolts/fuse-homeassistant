@@ -1,4 +1,11 @@
-"""Sensor platform for the Fuse Energy integration."""
+"""Sensor platform for the Fuse Energy integration.
+
+Both sensors use ``SensorStateClass.MEASUREMENT``. The long-term hourly
+statistics that show up on the Energy dashboard / Statistics card come
+from the writer in ``statistics.py`` — not from these entities — so we
+deliberately don't use ``TOTAL_INCREASING`` (which would generate
+conflicting auto-statistics on the same series).
+"""
 from __future__ import annotations
 
 from homeassistant.components.sensor import (
@@ -13,7 +20,7 @@ from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
-from .const import DOMAIN, SENSOR_COST_TOTAL, SENSOR_ENERGY_TOTAL
+from .const import DOMAIN, SENSOR_LAST_HOUR_COST, SENSOR_LAST_HOUR_KWH
 from .coordinator import FuseEnergyDataUpdateCoordinator
 
 
@@ -25,8 +32,8 @@ async def async_setup_entry(
     coordinator: FuseEnergyDataUpdateCoordinator = hass.data[DOMAIN][entry.entry_id]
     async_add_entities(
         [
-            FuseEnergyEnergyTotalSensor(coordinator, entry.entry_id),
-            FuseEnergyCostTotalSensor(coordinator, entry.entry_id),
+            FuseEnergyLastHourEnergySensor(coordinator, entry.entry_id),
+            FuseEnergyLastHourCostSensor(coordinator, entry.entry_id),
         ]
     )
 
@@ -56,10 +63,10 @@ class _FuseEnergyBaseSensor(
         return super().available and self.coordinator.data is not None
 
 
-class FuseEnergyEnergyTotalSensor(_FuseEnergyBaseSensor):
-    _attr_name = "Energy total"
+class FuseEnergyLastHourEnergySensor(_FuseEnergyBaseSensor):
+    _attr_name = "Last hour energy"
     _attr_device_class = SensorDeviceClass.ENERGY
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+    _attr_state_class = SensorStateClass.MEASUREMENT
     _attr_native_unit_of_measurement = UnitOfEnergy.KILO_WATT_HOUR
 
     def __init__(
@@ -67,30 +74,30 @@ class FuseEnergyEnergyTotalSensor(_FuseEnergyBaseSensor):
         coordinator: FuseEnergyDataUpdateCoordinator,
         entry_id: str,
     ) -> None:
-        super().__init__(coordinator, entry_id, SENSOR_ENERGY_TOTAL)
+        super().__init__(coordinator, entry_id, SENSOR_LAST_HOUR_KWH)
 
     @property
     def native_value(self) -> float | None:
         if self.coordinator.data is None:
             return None
-        return self.coordinator.data.energy_total_kwh
+        return self.coordinator.data.last_hour_kwh
 
 
-class FuseEnergyCostTotalSensor(_FuseEnergyBaseSensor):
-    _attr_name = "Cost total"
+class FuseEnergyLastHourCostSensor(_FuseEnergyBaseSensor):
+    _attr_name = "Last hour cost"
     _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
-    _attr_native_unit_of_measurement = "GBP"  # ISO 4217 - HA dashboard accepts
+    _attr_state_class = SensorStateClass.MEASUREMENT
+    _attr_native_unit_of_measurement = "GBP"
 
     def __init__(
         self,
         coordinator: FuseEnergyDataUpdateCoordinator,
         entry_id: str,
     ) -> None:
-        super().__init__(coordinator, entry_id, SENSOR_COST_TOTAL)
+        super().__init__(coordinator, entry_id, SENSOR_LAST_HOUR_COST)
 
     @property
     def native_value(self) -> float | None:
         if self.coordinator.data is None:
             return None
-        return self.coordinator.data.cost_total_gbp
+        return self.coordinator.data.last_hour_cost_gbp
