@@ -214,3 +214,59 @@ async def test_network_error_raises_api_error() -> None:
 
     with pytest.raises(FuseEnergyApiError):
         await client.async_fetch_day(date(2026, 5, 21))
+
+
+async def test_version_unavailable_raises_api_error() -> None:
+    from custom_components.fuse_energy.version_resolver import AppVersionUnavailable
+
+    session = MagicMock()
+    resolver = MagicMock(spec=AppVersionResolver)
+    resolver.async_resolve = AsyncMock(side_effect=AppVersionUnavailable("homepage 503"))
+
+    client = FuseEnergyApiClient(
+        session=session,
+        session_id="sid",
+        app_auth="aa",
+        premises_fid="pfid",
+        version_resolver=resolver,
+    )
+
+    with pytest.raises(FuseEnergyApiError) as exc_info:
+        await client.async_fetch_day(date(2026, 5, 21))
+    assert isinstance(exc_info.value.__cause__, AppVersionUnavailable)
+
+
+async def test_null_kwh_or_amount_bars_are_dropped() -> None:
+    payload = {"result": {"data": {"data": {"chart": {
+        "current_index": {"year": 2026, "month": 5, "day": 21, "hour": 23},
+        "supplies": [{
+            "supply_fid": "supply-uuid",
+            "supply_type": "ELEC_IMPORT",
+            "bars": [
+                {"bar": {
+                    "index": {"year": 2026, "month": 5, "day": 21, "hour": 0},
+                    "money": {"amount": "0.03", "currency": "GBP"},
+                    "kWh": None,
+                    "type": "REALISED",
+                }, "breakdown": []},
+                {"bar": {
+                    "index": {"year": 2026, "month": 5, "day": 21, "hour": 1},
+                    "money": {"amount": None, "currency": "GBP"},
+                    "kWh": "0.21",
+                    "type": "REALISED",
+                }, "breakdown": []},
+                {"bar": {
+                    "index": {"year": 2026, "month": 5, "day": 21, "hour": 2},
+                    "money": {"amount": "0.05", "currency": "GBP"},
+                    "kWh": "0.30",
+                    "type": "REALISED",
+                }, "breakdown": []},
+            ],
+        }],
+    }}}}}
+
+    session = MagicMock()
+    session.get = MagicMock(return_value=_resp(200, payload))
+    client = _make_client_with_session(session)
+    bars = await client.async_fetch_day(date(2026, 5, 21))
+    assert [b.local_hour for b in bars] == [2]

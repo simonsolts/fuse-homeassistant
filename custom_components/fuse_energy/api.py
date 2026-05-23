@@ -21,7 +21,7 @@ from urllib.parse import quote
 import aiohttp
 
 from .const import FUSE_BASE_URL, FUSE_TRPC_PATH
-from .version_resolver import AppVersionResolver
+from .version_resolver import AppVersionResolver, AppVersionUnavailable
 
 _LOGGER = logging.getLogger(__name__)
 _FETCH_PATH = f"{FUSE_TRPC_PATH}/premisesDisplayData"
@@ -93,7 +93,12 @@ class FuseEnergyApiClient:
                 ) from err
 
     async def _fetch_once(self, local_date: date) -> list[HourlyBar]:
-        version = await self._version_resolver.async_resolve()
+        try:
+            version = await self._version_resolver.async_resolve()
+        except AppVersionUnavailable as err:
+            raise FuseEnergyApiError(
+                f"could not resolve x-fuse-app-version: {err}"
+            ) from err
         input_obj = {
             "premisesFid": self._premises_fid,
             "index": {
@@ -157,12 +162,16 @@ def _parse_bars(payload: dict, local_date: date) -> list[HourlyBar]:
                 local_date.day,
             ):
                 continue
+            kwh_raw = bar.get("kWh")
+            amount_raw = (bar.get("money") or {}).get("amount")
+            if kwh_raw is None or amount_raw is None:
+                continue
             bars.append(
                 HourlyBar(
                     local_date=local_date,
                     local_hour=int(idx.get("hour", 0)),
-                    kwh=Decimal(str(bar.get("kWh"))),
-                    cost_gbp=Decimal(str((bar.get("money") or {}).get("amount"))),
+                    kwh=Decimal(str(kwh_raw)),
+                    cost_gbp=Decimal(str(amount_raw)),
                     is_realised=bar.get("type") == "REALISED",
                 )
             )
