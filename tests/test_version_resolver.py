@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from unittest.mock import AsyncMock, MagicMock
 
+import aiohttp
 import pytest
 
 from custom_components.fuse_energy.version_resolver import (
@@ -112,3 +113,23 @@ async def test_raises_when_homepage_fails() -> None:
 
     with pytest.raises(AppVersionUnavailable):
         await resolver.async_resolve()
+
+
+async def test_chunks_all_failing_raises_with_network_context() -> None:
+    """If every chunk fetch raises, the user should see a network-flavored error,
+    not the "literal not found" message which implies the JS shape changed."""
+    homepage_resp = _mock_response(200, HOMEPAGE_HTML_TEMPLATE)
+    session = MagicMock()
+
+    def _get(url: str, **_kwargs):
+        if url == "https://www.fuseenergy.com/":
+            return homepage_resp
+        raise aiohttp.ClientError(f"boom fetching {url}")
+
+    session.get = MagicMock(side_effect=_get)
+    resolver = AppVersionResolver(session)
+
+    with pytest.raises(AppVersionUnavailable) as exc_info:
+        await resolver.async_resolve()
+    assert exc_info.value.__cause__ is not None
+    assert isinstance(exc_info.value.__cause__, aiohttp.ClientError)

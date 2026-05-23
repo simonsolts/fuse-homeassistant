@@ -44,6 +44,7 @@ class AppVersionResolver:
         self._cached = None
 
     async def async_resolve(self) -> str:
+        """Return the cached version, fetching it first if needed."""
         if self._cached is not None:
             return self._cached
         self._cached = await self._discover()
@@ -68,6 +69,11 @@ class AppVersionResolver:
         for result in results:
             if isinstance(result, str):
                 return result
+        exceptions = [r for r in results if isinstance(r, Exception)]
+        if exceptions:
+            raise AppVersionUnavailable(
+                "failed to fetch one or more JS chunks while discovering version"
+            ) from exceptions[0]
         raise AppVersionUnavailable(
             "x-fuse-app-version literal not found in any loaded chunk"
         )
