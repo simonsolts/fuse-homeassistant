@@ -53,7 +53,7 @@ class _FuseEnergyBaseSensor(
 
     @property
     def available(self) -> bool:
-        return self.coordinator.data is not None
+        return super().available and self.coordinator.data is not None
 
 
 class FuseEnergyEnergyTotalSensor(_FuseEnergyBaseSensor):

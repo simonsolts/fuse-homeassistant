@@ -70,3 +70,20 @@ async def test_sensors_unavailable_when_coordinator_data_is_none(
     assert cost.available is False
     assert energy.native_value is None
     assert cost.native_value is None
+
+
+async def test_sensors_unavailable_when_last_update_failed(
+    hass: HomeAssistant,
+) -> None:
+    """When a poll fails after data was previously populated, sensors must report
+    unavailable rather than showing the stale snapshot as live."""
+    coordinator = await _make_coordinator(
+        hass, FuseEnergyData(energy_total_kwh=10.0, cost_total_gbp=2.0)
+    )
+    coordinator.last_update_success = False
+
+    energy = FuseEnergyEnergyTotalSensor(coordinator, entry_id="entry-1")
+    cost = FuseEnergyCostTotalSensor(coordinator, entry_id="entry-1")
+
+    assert energy.available is False
+    assert cost.available is False
