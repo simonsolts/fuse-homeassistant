@@ -21,7 +21,7 @@ _LOGGER = logging.getLogger(__name__)
 
 
 class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator):  # rewritten in Task 6
-    """Polls the Fuse Energy API and serves a FuseEnergyData snapshot."""
+    """Stub; rewritten in Task 6."""
 
     def __init__(
         self,

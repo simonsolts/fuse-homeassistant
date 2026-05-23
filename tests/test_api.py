@@ -1,9 +1,8 @@
 """Tests for the Fuse Energy tRPC client."""
 from __future__ import annotations
 
-from decimal import Decimal
 from datetime import date
-
+from decimal import Decimal
 from unittest.mock import MagicMock
 
 import aiohttp
