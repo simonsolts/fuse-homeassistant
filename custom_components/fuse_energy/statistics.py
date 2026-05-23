@@ -9,8 +9,7 @@ statistics rows must ``start`` at a UTC hour boundary. We convert per bar.
 """
 from __future__ import annotations
 
-import logging
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
@@ -34,7 +33,6 @@ from .const import (
     STAT_ID_COST_TEMPLATE,
 )
 
-_LOGGER = logging.getLogger(__name__)
 _FUSE_TZ = ZoneInfo("Europe/London")
 
 
@@ -80,10 +78,10 @@ async def _import_series(
     unit: str,
     name: str,
     bars: list[HourlyBar],
-    value_getter,
+    value_getter: Callable[[HourlyBar], Decimal],
 ) -> None:
     last = await get_instance(hass).async_add_executor_job(
-        get_last_statistics, hass, 1, statistic_id, True, {"sum", "start"}
+        get_last_statistics, hass, 1, statistic_id, True, {"sum"}
     )
     last_rows = last.get(statistic_id) or []
     if last_rows:
@@ -98,7 +96,7 @@ async def _import_series(
         start = _bar_start_utc(bar)
         if start.timestamp() <= last_start_ts:
             continue
-        value = float(_to_decimal(value_getter(bar)))
+        value = float(value_getter(bar))
         running_sum += value
         rows.append(
             StatisticData(start=start, state=value, sum=running_sum)
@@ -129,5 +127,3 @@ def _bar_start_utc(bar: HourlyBar) -> datetime:
     return local.astimezone(UTC)
 
 
-def _to_decimal(value) -> Decimal:
-    return value if isinstance(value, Decimal) else Decimal(str(value))

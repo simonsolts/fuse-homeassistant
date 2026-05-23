@@ -95,7 +95,6 @@ async def test_resumes_from_last_recorded_sum(
     await async_import_hourly_bars(hass, "pfid", [_bar(0, "0.5", "0.05")])
     await async_wait_recording_done(hass)
 
-    # Second batch overlaps: hour 0 already stored, hour 1 is new.
     await async_import_hourly_bars(
         hass, "pfid", [_bar(0, "0.5", "0.05"), _bar(1, "0.4", "0.04")]
     )
@@ -105,13 +104,11 @@ async def test_resumes_from_last_recorded_sum(
     last = await get_instance(hass).async_add_executor_job(
         get_last_statistics, hass, 5, kwh_id, True, {"sum"}
     )
-    # Two rows total; second sum = 0.5 + 0.4 = 0.9
     sums = sorted(r["sum"] for r in last[kwh_id])
     assert sums == [pytest.approx(0.5), pytest.approx(0.9)]
 
 
 async def test_empty_bars_is_noop(recorder_mock, hass: HomeAssistant) -> None:
-    # Should not raise, not write anything.
     await async_import_hourly_bars(hass, "pfid", [])
     await async_wait_recording_done(hass)
 
