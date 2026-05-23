@@ -43,3 +43,83 @@ def test_api_module_exposes_expected_surface() -> None:
     session = MagicMock(spec=aiohttp.ClientSession)
     client = api.FuseEnergyApiClient(session=session, access_token="x")
     assert isinstance(client, api.FuseEnergyApiClient)
+
+
+import pytest
+from unittest.mock import AsyncMock
+
+from homeassistant.core import HomeAssistant
+from homeassistant.exceptions import ConfigEntryAuthFailed
+from homeassistant.helpers.update_coordinator import UpdateFailed
+
+
+async def test_coordinator_translates_auth_error_to_config_entry_auth_failed(
+    hass: HomeAssistant,
+) -> None:
+    from custom_components.fuse_energy.api import (
+        FuseEnergyApiAuthError,
+        FuseEnergyApiClient,
+    )
+    from custom_components.fuse_energy.coordinator import (
+        FuseEnergyDataUpdateCoordinator,
+    )
+
+    client = AsyncMock(spec=FuseEnergyApiClient)
+    client.async_get_data.side_effect = FuseEnergyApiAuthError("bad token")
+
+    coordinator = FuseEnergyDataUpdateCoordinator(hass, client)
+    with pytest.raises(ConfigEntryAuthFailed):
+        await coordinator._async_update_data()
+
+
+async def test_coordinator_translates_api_error_to_update_failed(
+    hass: HomeAssistant,
+) -> None:
+    from custom_components.fuse_energy.api import (
+        FuseEnergyApiClient,
+        FuseEnergyApiError,
+    )
+    from custom_components.fuse_energy.coordinator import (
+        FuseEnergyDataUpdateCoordinator,
+    )
+
+    client = AsyncMock(spec=FuseEnergyApiClient)
+    client.async_get_data.side_effect = FuseEnergyApiError("boom")
+
+    coordinator = FuseEnergyDataUpdateCoordinator(hass, client)
+    with pytest.raises(UpdateFailed):
+        await coordinator._async_update_data()
+
+
+async def test_coordinator_translates_not_implemented_to_update_failed(
+    hass: HomeAssistant,
+) -> None:
+    from custom_components.fuse_energy.api import FuseEnergyApiClient
+    from custom_components.fuse_energy.coordinator import (
+        FuseEnergyDataUpdateCoordinator,
+    )
+
+    client = AsyncMock(spec=FuseEnergyApiClient)
+    client.async_get_data.side_effect = NotImplementedError("stub")
+
+    coordinator = FuseEnergyDataUpdateCoordinator(hass, client)
+    with pytest.raises(UpdateFailed, match="not yet reverse-engineered"):
+        await coordinator._async_update_data()
+
+
+async def test_coordinator_returns_data_on_success(hass: HomeAssistant) -> None:
+    from custom_components.fuse_energy.api import (
+        FuseEnergyApiClient,
+        FuseEnergyData,
+    )
+    from custom_components.fuse_energy.coordinator import (
+        FuseEnergyDataUpdateCoordinator,
+    )
+
+    snapshot = FuseEnergyData(energy_total_kwh=12.5, cost_total_gbp=3.4)
+    client = AsyncMock(spec=FuseEnergyApiClient)
+    client.async_get_data.return_value = snapshot
+
+    coordinator = FuseEnergyDataUpdateCoordinator(hass, client)
+    result = await coordinator._async_update_data()
+    assert result is snapshot
