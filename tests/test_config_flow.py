@@ -7,6 +7,10 @@ from homeassistant.core import HomeAssistant
 from homeassistant.data_entry_flow import FlowResultType
 from pytest_homeassistant_custom_component.common import MockConfigEntry
 
+from custom_components.fuse_energy.api import (
+    FuseEnergyApiAuthError,
+    FuseEnergyApiError,
+)
 from custom_components.fuse_energy.const import (
     CONF_APP_AUTH,
     CONF_PREMISES_FID,
@@ -54,7 +58,6 @@ async def test_successful_submission_creates_entry(
 async def test_invalid_auth_surfaces_field_error(
     hass: HomeAssistant, auto_enable_custom_integrations
 ) -> None:
-    from custom_components.fuse_energy.api import FuseEnergyApiAuthError
     with patch(
         "custom_components.fuse_energy.config_flow.FuseEnergyApiClient.async_fetch_day",
         side_effect=FuseEnergyApiAuthError("bad"),
@@ -72,7 +75,6 @@ async def test_invalid_auth_surfaces_field_error(
 async def test_network_error_surfaces_cannot_connect(
     hass: HomeAssistant, auto_enable_custom_integrations
 ) -> None:
-    from custom_components.fuse_energy.api import FuseEnergyApiError
     with patch(
         "custom_components.fuse_energy.config_flow.FuseEnergyApiClient.async_fetch_day",
         side_effect=FuseEnergyApiError("boom"),

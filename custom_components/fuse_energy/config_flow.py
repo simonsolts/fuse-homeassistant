@@ -45,6 +45,7 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         if self._async_current_entries():
             return self.async_abort(reason="single_instance_allowed")
 
+        # Guards against the TOCTOU window between two simultaneous flow initiations.
         await self.async_set_unique_id(_UNIQUE_ID)
         self._abort_if_unique_id_configured()
 
