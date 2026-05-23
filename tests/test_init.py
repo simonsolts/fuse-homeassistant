@@ -21,3 +21,25 @@ def test_manifest_is_valid_json_with_required_keys() -> None:
     assert manifest["iot_class"] == "cloud_polling"
     assert manifest["version"] == "0.0.1"
     assert manifest["codeowners"] == []
+
+
+def test_api_module_exposes_expected_surface() -> None:
+    from unittest.mock import MagicMock
+
+    import aiohttp
+
+    from custom_components.fuse_energy import api
+
+    # Dataclass
+    sample = api.FuseEnergyData(energy_total_kwh=1.0, cost_total_gbp=2.0)
+    assert sample.energy_total_kwh == 1.0
+    assert sample.cost_total_gbp == 2.0
+
+    # Exception hierarchy
+    assert issubclass(api.FuseEnergyApiAuthError, api.FuseEnergyApiError)
+
+    # Constructor (use a mock session to avoid needing a running event loop;
+    # the stub doesn't touch the session, so a placeholder is sufficient).
+    session = MagicMock(spec=aiohttp.ClientSession)
+    client = api.FuseEnergyApiClient(session=session, access_token="x")
+    assert isinstance(client, api.FuseEnergyApiClient)
