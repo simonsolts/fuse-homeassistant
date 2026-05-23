@@ -1,9 +1,7 @@
 """Tests for fuse_energy sensor entities."""
 from __future__ import annotations
 
-from datetime import datetime
 from unittest.mock import AsyncMock
-from zoneinfo import ZoneInfo
 
 from homeassistant.components.sensor import SensorDeviceClass, SensorStateClass
 from homeassistant.const import UnitOfEnergy
@@ -18,9 +16,6 @@ from custom_components.fuse_energy.sensor import (
     FuseEnergyLastHourCostSensor,
     FuseEnergyLastHourEnergySensor,
 )
-
-
-LDN = ZoneInfo("Europe/London")
 
 
 async def _coord(hass: HomeAssistant, snap: FuseEnergySnapshot | None) -> FuseEnergyDataUpdateCoordinator:
@@ -66,8 +61,10 @@ async def test_sensors_unavailable_when_snapshot_is_none(hass: HomeAssistant) ->
     coord = await _coord(hass, None)
     e = FuseEnergyLastHourEnergySensor(coord, entry_id="entry-1")
     c = FuseEnergyLastHourCostSensor(coord, entry_id="entry-1")
-    assert e.available is False and c.available is False
-    assert e.native_value is None and c.native_value is None
+    assert e.available is False
+    assert c.available is False
+    assert e.native_value is None
+    assert c.native_value is None
 
 
 async def test_sensors_unavailable_after_failed_update(hass: HomeAssistant) -> None:
@@ -78,4 +75,5 @@ async def test_sensors_unavailable_after_failed_update(hass: HomeAssistant) -> N
     coord.last_update_success = False
     e = FuseEnergyLastHourEnergySensor(coord, entry_id="entry-1")
     c = FuseEnergyLastHourCostSensor(coord, entry_id="entry-1")
-    assert e.available is False and c.available is False
+    assert e.available is False
+    assert c.available is False
