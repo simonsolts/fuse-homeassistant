@@ -131,3 +131,77 @@ async def test_send_otp_raises_transient_on_web_dispatch_failure() -> None:
     session = _session_with_posts(mobile_ok, web_bad)
     with pytest.raises(auth_mod.FuseEnergyAuthTransient):
         await auth_mod.async_send_otp(session, device_id="d", phone_number="+1")
+
+
+async def test_verify_otp_returns_authorized_result() -> None:
+    resp = _resp(200, {
+        "auth_flow_token": "FLOW",
+        "challenge_type": "AUTHORIZED",
+        "data": {
+            "access_token": "AT", "refresh_token": "RT",
+            "is_new_user_created": False,
+        },
+    })
+    session = _session_with_posts(resp)
+
+    result = await auth_mod.async_verify_otp(
+        session, device_id="d", auth_flow_token="FLOW_IN", code="123456",
+    )
+
+    assert isinstance(result, auth_mod.AuthorizedResult)
+    assert result.tokens == auth_mod.TokenPair("AT", "RT")
+
+    # Auth carriage MUST be Authorization: Bearer <flow_token>
+    args, kwargs = session.post.call_args_list[0]
+    assert args[0] == "https://api.fuseenergy.com/api/v3/auth"
+    assert kwargs["headers"]["Authorization"] == "Bearer FLOW_IN"
+    assert kwargs["headers"]["Device-Id"] == "d"
+    assert kwargs["json"] == {
+        "challenge_type": "PHONE_OTP",
+        "data": {"code": "123456"},
+    }
+
+
+async def test_verify_otp_returns_additional_info_result() -> None:
+    resp = _resp(200, {
+        "auth_flow_token": "FLOW_NEW",
+        "challenge_type": "ADDITIONAL_INFO",
+        "data": {
+            "title": "Verify your date of birth",
+            "subtitle": "Let's make sure this is the right account",
+            "questions": [
+                {"key": "DATE_OF_BIRTH", "title": "Date of birth", "type": "DATE"},
+            ],
+        },
+    })
+    session = _session_with_posts(resp)
+
+    result = await auth_mod.async_verify_otp(
+        session, device_id="d", auth_flow_token="FLOW_IN", code="123456",
+    )
+
+    assert isinstance(result, auth_mod.AdditionalInfoResult)
+    assert result.auth_flow_token == "FLOW_NEW"
+    assert result.title == "Verify your date of birth"
+    assert result.questions == [
+        auth_mod.Question(key="DATE_OF_BIRTH", title="Date of birth", type="DATE"),
+    ]
+
+
+async def test_verify_otp_raises_on_wrong_code() -> None:
+    resp = _resp(400, {"status_string": "invalid_code"})
+    session = _session_with_posts(resp)
+    with pytest.raises(auth_mod.FuseEnergyAuthError) as ei:
+        await auth_mod.async_verify_otp(
+            session, device_id="d", auth_flow_token="F", code="000000",
+        )
+    assert ei.value.error_code == "invalid_code"
+
+
+async def test_verify_otp_raises_transient_on_5xx() -> None:
+    resp = _resp(503, {})
+    session = _session_with_posts(resp)
+    with pytest.raises(auth_mod.FuseEnergyAuthTransient):
+        await auth_mod.async_verify_otp(
+            session, device_id="d", auth_flow_token="F", code="000000",
+        )

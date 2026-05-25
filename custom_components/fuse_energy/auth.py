@@ -150,3 +150,51 @@ async def async_send_otp(
             )
     except aiohttp.ClientError as e:
         raise FuseEnergyAuthTransient(f"network: {e}") from e
+
+
+def _parse_challenge(payload: dict) -> AuthStepResult:
+    """Dispatch on challenge_type. Used by async_verify_otp and
+    async_submit_additional_info."""
+    ct = payload.get("challenge_type")
+    if ct == "AUTHORIZED":
+        data = payload.get("data") or {}
+        return AuthorizedResult(
+            tokens=TokenPair(
+                access_token=data["access_token"],
+                refresh_token=data["refresh_token"],
+            )
+        )
+    if ct == "ADDITIONAL_INFO":
+        data = payload.get("data") or {}
+        questions = [
+            Question(key=q["key"], title=q.get("title", q["key"]),
+                     type=q.get("type", "TEXT"))
+            for q in (data.get("questions") or [])
+        ]
+        return AdditionalInfoResult(
+            auth_flow_token=payload.get("auth_flow_token") or "",
+            title=data.get("title", ""),
+            subtitle=data.get("subtitle", ""),
+            questions=questions,
+        )
+    raise FuseEnergyAuthError(
+        f"unexpected challenge_type: {ct!r}", error_code="unsupported_challenge",
+    )
+
+
+async def async_verify_otp(
+    session: aiohttp.ClientSession, *,
+    device_id: str, auth_flow_token: str, code: str,
+) -> AuthStepResult:
+    """POST /api/v3/auth PHONE_OTP with Authorization: Bearer <auth_flow_token>.
+
+    Returns AuthorizedResult or AdditionalInfoResult depending on whether
+    Fuse requests additional verification.
+    """
+    payload = await _post_mobile_auth(
+        session,
+        {"challenge_type": "PHONE_OTP", "data": {"code": code}},
+        device_id=device_id,
+        bearer=auth_flow_token,
+    )
+    return _parse_challenge(payload)
