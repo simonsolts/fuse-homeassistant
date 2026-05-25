@@ -1,48 +1,48 @@
-"""Fuse Energy tRPC client.
+"""Fuse Energy mobile-API client.
 
-Protocol summary:
-
-- Endpoint: ``GET /api/trpc/premisesDisplayData?input=<urlencoded-json>``
-  where the JSON is ``{"premisesFid": <uuid>, "index": {"year","month","day"}}``.
-- Auth: cookies ``session_id`` (UUID) and ``app-auth`` (server-encrypted token).
-- Required header: ``x-fuse-app-version: <live value>`` — strict equality.
-  Wrong/missing value -> HTTP 500 with ``____reloadRequired: true``.
-- Sign-out signal: HTTP 500 with ``____signOutRequired: true``.
+Targets api.fuseenergy.com with Authorization: Bearer <access_token> +
+Device-Id headers. Wraps every call with transparent refresh-on-401.
 """
 from __future__ import annotations
 
-import json
+import asyncio
 import logging
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from urllib.parse import quote
+from typing import Awaitable, Callable
 
 import aiohttp
 
-from .const import FUSE_BASE_URL, FUSE_TRPC_PATH
-from .version_resolver import AppVersionResolver, AppVersionUnavailable
+from .auth import (
+    FuseEnergyAuthError,
+    FuseEnergyAuthTransient,
+    TokenPair,
+    async_refresh,
+)
+from .const import FUSE_API_BASE_URL
 
 _LOGGER = logging.getLogger(__name__)
-_FETCH_PATH = f"{FUSE_TRPC_PATH}/premisesDisplayData"
+_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
 
 class FuseEnergyApiError(Exception):
-    """Generic error talking to the Fuse Energy API (network, 5xx, malformed)."""
+    """Generic transport / parse error — caller maps to UpdateFailed."""
 
 
 class FuseEnergyApiAuthError(FuseEnergyApiError):
-    """Cookies are missing/invalid or the server signalled ____signOutRequired."""
+    """Refresh itself failed — caller maps to ConfigEntryAuthFailed."""
 
 
-@dataclass(slots=True, frozen=True)
+@dataclass(frozen=True, slots=True)
+class Premises:
+    """A premises returned by /api/v2/customer/premises."""
+    fid: str
+
+
+@dataclass(frozen=True, slots=True)
 class HourlyBar:
-    """One hour of consumption + cost from Fuse's chart.
-
-    Local date/hour are in Europe/London. Translation to UTC happens
-    in the statistics writer.
-    """
-
+    """One hour of consumption + cost. Same shape as the previous client."""
     local_date: date
     local_hour: int
     kwh: Decimal
@@ -51,115 +51,184 @@ class HourlyBar:
 
 
 class FuseEnergyApiClient:
-    """Async client for the Fuse Energy customer tRPC API."""
+    """Mobile-API client with refresh-on-401 retry."""
 
     def __init__(
         self,
         session: aiohttp.ClientSession,
         *,
-        session_id: str,
-        app_auth: str,
-        premises_fid: str,
-        version_resolver: AppVersionResolver | None = None,
+        device_id: str,
+        tokens: TokenPair,
+        on_tokens_refreshed: Callable[[TokenPair], Awaitable[None]],
     ) -> None:
         self._session = session
-        self._session_id = session_id
-        self._app_auth = app_auth
-        self._premises_fid = premises_fid
-        self._version_resolver = version_resolver or AppVersionResolver(session)
+        self._device_id = device_id
+        self._tokens = tokens
+        self._on_tokens_refreshed = on_tokens_refreshed
+        self._refresh_lock = asyncio.Lock()
 
-    async def async_fetch_day(self, local_date: date) -> list[HourlyBar]:
-        """Fetch hourly bars for one local-time date.
+    @property
+    def tokens(self) -> TokenPair:
+        return self._tokens
 
-        Retries once after invalidating the version resolver if the server
-        signals ``____reloadRequired`` (UI version drift). Raises
-        ``FuseEnergyApiAuthError`` on auth failure, ``FuseEnergyApiError``
-        on anything else.
+    async def _request(self, method: str, path: str, **kw) -> dict | list:
+        """Issue an authenticated request; on 401, refresh once and retry.
+
+        On second 401 (or refresh-itself failure), raise FuseEnergyApiAuthError.
+        On 5xx / network, raise FuseEnergyApiError.
         """
-        try:
-            return await self._fetch_once(local_date)
-        except _StalledUIError:
-            _LOGGER.warning(
-                "Cached x-fuse-app-version is stale; refreshing version and retrying."
-            )
-            self._version_resolver.invalidate()
+        for attempt in (0, 1):
+            stale_token = self._tokens.access_token
+            headers = {
+                "Authorization": f"Bearer {stale_token}",
+                "Device-Id": self._device_id,
+                **kw.pop("headers", {}),
+            }
             try:
-                return await self._fetch_once(local_date)
-            except _StalledUIError as err:
-                raise FuseEnergyApiError(
-                    "Fuse rejected request as 'UI stalled' twice in a row; "
-                    "either the version-discovery is broken or the API contract "
-                    "changed."
-                ) from err
+                async with self._session.request(
+                    method, f"{FUSE_API_BASE_URL}{path}",
+                    headers=headers, timeout=_TIMEOUT, **kw,
+                ) as r:
+                    if r.status == 401:
+                        if attempt == 1:
+                            raise FuseEnergyApiAuthError(
+                                "401 even after refresh"
+                            )
+                        await self._refresh_tokens(stale_token)
+                        continue
+                    if 500 <= r.status:
+                        raise FuseEnergyApiError(
+                            f"HTTP {r.status} from {path}"
+                        )
+                    if not (200 <= r.status < 300):
+                        body = await r.text()
+                        raise FuseEnergyApiError(
+                            f"HTTP {r.status} from {path}: {body[:200]}"
+                        )
+                    return await r.json()
+            except aiohttp.ClientError as e:
+                raise FuseEnergyApiError(f"network: {e}") from e
+        raise FuseEnergyApiError("unreachable")
 
-    async def _fetch_once(self, local_date: date) -> list[HourlyBar]:
+    async def _get(self, path: str, **kw) -> dict | list:
+        # Defer to _request, but use session.get to keep test seams simple.
+        # Capture the token we're about to use so _refresh_tokens can detect
+        # whether a concurrent caller already refreshed on our behalf.
+        stale_token = self._tokens.access_token
+        headers = {
+            "Authorization": f"Bearer {stale_token}",
+            "Device-Id": self._device_id,
+        }
         try:
-            version = await self._version_resolver.async_resolve()
-        except AppVersionUnavailable as err:
-            raise FuseEnergyApiError(
-                f"could not resolve x-fuse-app-version: {err}"
-            ) from err
-        input_obj = {
-            "premisesFid": self._premises_fid,
-            "index": {
+            async with self._session.get(
+                f"{FUSE_API_BASE_URL}{path}",
+                headers=headers, timeout=_TIMEOUT, **kw,
+            ) as r:
+                if r.status == 401:
+                    # Yield once so sibling tasks can reach the same 401 branch
+                    # before any refresh starts, maximising deduplication.
+                    await asyncio.sleep(0)
+                    await self._refresh_tokens(stale_token)
+                    headers = {
+                        "Authorization": f"Bearer {self._tokens.access_token}",
+                        "Device-Id": self._device_id,
+                    }
+                    async with self._session.get(
+                        f"{FUSE_API_BASE_URL}{path}",
+                        headers=headers, timeout=_TIMEOUT, **kw,
+                    ) as r2:
+                        if r2.status == 401:
+                            raise FuseEnergyApiAuthError("401 even after refresh")
+                        if not (200 <= r2.status < 300):
+                            raise FuseEnergyApiError(
+                                f"HTTP {r2.status} from {path}"
+                            )
+                        return await r2.json()
+                if 500 <= r.status:
+                    raise FuseEnergyApiError(f"HTTP {r.status} from {path}")
+                if not (200 <= r.status < 300):
+                    raise FuseEnergyApiError(f"HTTP {r.status} from {path}")
+                return await r.json()
+        except aiohttp.ClientError as e:
+            raise FuseEnergyApiError(f"network: {e}") from e
+
+    async def _refresh_tokens(self, stale_token: str) -> None:
+        """Refresh the token pair, serialised so concurrent ticks share one
+        refresh. Guards by stale_token so both the concurrent-waiter case
+        (blocked on the lock while another caller refreshed) and the
+        sequential case (caller started after refresh completed) are handled:
+        if the current access_token is no longer stale_token the refresh
+        already happened and we skip it.
+
+        Persists via on_tokens_refreshed BEFORE swapping in-memory.
+        """
+        async with self._refresh_lock:
+            if self._tokens.access_token != stale_token:
+                return  # another caller already refreshed
+            try:
+                new_tokens = await async_refresh(
+                    self._session,
+                    device_id=self._device_id,
+                    tokens=self._tokens,
+                )
+            except FuseEnergyAuthError as e:
+                raise FuseEnergyApiAuthError(str(e)) from e
+            except FuseEnergyAuthTransient as e:
+                raise FuseEnergyApiError(str(e)) from e
+            await self._on_tokens_refreshed(new_tokens)
+            self._tokens = new_tokens
+
+    async def async_list_premises(self) -> list[Premises]:
+        """GET /api/v2/customer/premises.
+
+        Response shape:
+          [{"premises": {"id": "<uuid>", ...}, "supplies": [...], "default_date_uk": "..."}, ...]
+        """
+        data = await self._get("/api/v2/customer/premises")
+        if not isinstance(data, list):
+            raise FuseEnergyApiError(f"unexpected list-premises shape: {type(data)}")
+        out: list[Premises] = []
+        for entry in data:
+            inner = (entry or {}).get("premises") or {}
+            fid = inner.get("id")
+            if not fid:
+                continue
+            out.append(Premises(fid=fid))
+        return out
+
+    async def async_fetch_day(
+        self, premises_fid: str, local_date: date,
+    ) -> list[HourlyBar]:
+        """GET /api/v1/premises/{premises_fid}/chart?year=Y&month=M&day=D.
+
+        Response shape (flat — no tRPC wrapping):
+          {"current_index": {...}, "supplies": [{"supply_fid", "supply_type",
+                                                  "bars": [{"bar": {...}, "breakdown": [...]}]}, ...]}
+        """
+        data = await self._get(
+            f"/api/v1/premises/{premises_fid}/chart",
+            params={
                 "year": local_date.year,
                 "month": local_date.month,
                 "day": local_date.day,
             },
-        }
-        url = (
-            f"{FUSE_BASE_URL}{_FETCH_PATH}"
-            f"?input={quote(json.dumps(input_obj, separators=(',', ':')))}"
         )
-        headers = {"x-fuse-app-version": version}
-        cookies = {"session_id": self._session_id, "app-auth": self._app_auth}
-
-        try:
-            async with self._session.get(url, headers=headers, cookies=cookies) as resp:
-                if resp.status == 401:
-                    raise FuseEnergyApiAuthError("HTTP 401 from Fuse")
-                payload = await resp.json()
-                if resp.status == 200:
-                    return _parse_bars(payload, local_date)
-                _classify_error(payload)
-                raise FuseEnergyApiError(
-                    f"unexpected HTTP {resp.status} from Fuse: {payload}"
-                )
-        except aiohttp.ClientError as err:
-            raise FuseEnergyApiError(str(err)) from err
-
-
-class _StalledUIError(Exception):
-    """Internal marker for ____reloadRequired:true responses."""
-
-
-def _classify_error(payload: dict) -> None:
-    """Raise the right exception class based on the tRPC error envelope."""
-    data = ((payload or {}).get("error") or {}).get("data") or {}
-    if data.get("____signOutRequired"):
-        raise FuseEnergyApiAuthError(
-            "Fuse signalled ____signOutRequired (session expired)"
-        )
-    if data.get("____reloadRequired"):
-        raise _StalledUIError("UI stalled — x-fuse-app-version is wrong")
-    # fall through; caller raises FuseEnergyApiError
+        if not isinstance(data, dict):
+            raise FuseEnergyApiError(f"unexpected chart shape: {type(data)}")
+        return _parse_bars(data, local_date)
 
 
 def _parse_bars(payload: dict, local_date: date) -> list[HourlyBar]:
-    """Extract the elec-import bars from a premisesDisplayData response."""
-    chart = ((payload or {}).get("result") or {}).get("data") or {}
-    chart = (chart.get("data") or {}).get("chart") or {}
+    """Extract ELEC_IMPORT bars matching local_date from the chart payload."""
     bars: list[HourlyBar] = []
-    for supply in chart.get("supplies") or ():
+    for supply in payload.get("supplies") or ():
         if supply.get("supply_type") != "ELEC_IMPORT":
             continue
         for entry in supply.get("bars") or ():
             bar = entry.get("bar") or {}
             idx = bar.get("index") or {}
             if (idx.get("year"), idx.get("month"), idx.get("day")) != (
-                local_date.year,
-                local_date.month,
-                local_date.day,
+                local_date.year, local_date.month, local_date.day,
             ):
                 continue
             kwh_raw = bar.get("kWh")

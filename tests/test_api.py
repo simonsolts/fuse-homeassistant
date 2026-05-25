@@ -1,11 +1,9 @@
-"""Tests for the Fuse Energy tRPC client."""
+"""Tests for the Fuse Energy mobile-API client."""
 from __future__ import annotations
 
-import json
 from datetime import date
 from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
-from urllib.parse import quote
 
 import aiohttp
 import pytest
@@ -15,23 +13,21 @@ from custom_components.fuse_energy.api import (
     FuseEnergyApiClient,
     FuseEnergyApiError,
     HourlyBar,
+    Premises,
 )
-from custom_components.fuse_energy.version_resolver import AppVersionResolver
+from custom_components.fuse_energy.auth import TokenPair
 
 
-def test_hourly_bar_is_a_dataclass_with_expected_fields() -> None:
-    bar = HourlyBar(
-        local_date=date(2026, 5, 21),
-        local_hour=20,
-        kwh=Decimal("7.633"),
-        cost_gbp=Decimal("1.76"),
-        is_realised=True,
+def test_hourly_bar_fields() -> None:
+    b = HourlyBar(
+        local_date=date(2026, 5, 21), local_hour=20,
+        kwh=Decimal("7.633"), cost_gbp=Decimal("1.76"), is_realised=True,
     )
-    assert bar.local_date == date(2026, 5, 21)
-    assert bar.local_hour == 20
-    assert bar.kwh == Decimal("7.633")
-    assert bar.cost_gbp == Decimal("1.76")
-    assert bar.is_realised is True
+    assert b.local_hour == 20
+
+
+def test_premises_carries_fid() -> None:
+    assert Premises(fid="abc").fid == "abc"
 
 
 def test_exception_hierarchy() -> None:
@@ -40,233 +36,245 @@ def test_exception_hierarchy() -> None:
 
 def test_client_constructor_signature() -> None:
     session = MagicMock(spec=aiohttp.ClientSession)
-    client = FuseEnergyApiClient(
+    async def _cb(_): pass
+    c = FuseEnergyApiClient(
         session=session,
-        session_id="sid",
-        app_auth="aa",
-        premises_fid="pfid",
+        device_id="dev",
+        tokens=TokenPair("a", "r"),
+        on_tokens_refreshed=_cb,
     )
-    assert client._premises_fid == "pfid"
+    assert c.tokens == TokenPair("a", "r")
 
 
-# ---------------------------------------------------------------------------
-# Task 4: async_fetch_day
-# ---------------------------------------------------------------------------
+def _resp(status: int, body):
+    r = MagicMock()
+    r.status = status
+    r.json = AsyncMock(return_value=body)
+    r.__aenter__ = AsyncMock(return_value=r)
+    r.__aexit__ = AsyncMock(return_value=False)
+    return r
 
 
-def _resp(status: int, json_body) -> MagicMock:
-    resp = MagicMock()
-    resp.status = status
-    resp.json = AsyncMock(return_value=json_body)
-    resp.__aenter__ = AsyncMock(return_value=resp)
-    resp.__aexit__ = AsyncMock(return_value=False)
-    return resp
-
-
-def _sample_payload() -> dict:
-    return {"result": {"data": {"data": {"chart": {
-        "current_index": {"year": 2026, "month": 5, "day": 21, "hour": 23},
-        "supplies": [{
-            "supply_fid": "supply-uuid",
-            "supply_type": "ELEC_IMPORT",
-            "bars": [
-                {"bar": {
-                    "index": {"year": 2026, "month": 5, "day": 21, "hour": 0},
-                    "money": {"amount": "0.03", "currency": "GBP"},
-                    "kWh": "0.128",
-                    "type": "REALISED",
-                }, "breakdown": []},
-                {"bar": {
-                    "index": {"year": 2026, "month": 5, "day": 21, "hour": 1},
-                    "money": {"amount": "0.04", "currency": "GBP"},
-                    "kWh": "0.21",
-                    "type": "FORECAST",
-                }, "breakdown": []},
-            ],
-        }, {
-            # Non-electricity supply must be ignored.
-            "supply_fid": "gas-uuid",
-            "supply_type": "GAS_IMPORT",
-            "bars": [{"bar": {"index": {"year": 2026, "month": 5, "day": 21, "hour": 0},
-                              "money": {"amount": "9.99", "currency": "GBP"},
-                              "kWh": "99.0", "type": "REALISED"}, "breakdown": []}],
-        }],
-    }}}}}
-
-
-def _make_client_with_session(session: MagicMock) -> FuseEnergyApiClient:
-    resolver = MagicMock(spec=AppVersionResolver)
-    resolver.async_resolve = AsyncMock(return_value="5.310")
-    resolver.invalidate = MagicMock()
+def _client_with_get(resp_or_resps, refreshed=None):
+    """Build a client whose session.get returns the given response(s).
+    `refreshed` is an optional callback to capture token-refresh events."""
+    session = MagicMock(spec=aiohttp.ClientSession)
+    if isinstance(resp_or_resps, list):
+        session.get = MagicMock(side_effect=resp_or_resps)
+    else:
+        session.get = MagicMock(return_value=resp_or_resps)
+    async def _cb(new):
+        if refreshed is not None:
+            refreshed.append(new)
     return FuseEnergyApiClient(
-        session=session,
-        session_id="sid",
-        app_auth="aa",
-        premises_fid="pfid",
-        version_resolver=resolver,
-    )
+        session=session, device_id="dev",
+        tokens=TokenPair("AT", "RT"), on_tokens_refreshed=_cb,
+    ), session
 
 
-async def test_fetch_day_returns_only_elec_bars_in_order() -> None:
-    session = MagicMock()
-    session.get = MagicMock(return_value=_resp(200, _sample_payload()))
-    client = _make_client_with_session(session)
+async def test_list_premises_parses_nested_shape() -> None:
+    resp = _resp(200, [
+        {"premises": {"id": "p1"}, "supplies": [], "default_date_uk": "2026-05-25"},
+        {"premises": {"id": "p2"}, "supplies": []},
+    ])
+    client, session = _client_with_get(resp)
 
-    bars = await client.async_fetch_day(date(2026, 5, 21))
+    out = await client.async_list_premises()
 
-    assert [b.local_hour for b in bars] == [0, 1]
-    assert bars[0].kwh == Decimal("0.128")
-    assert bars[0].cost_gbp == Decimal("0.03")
-    assert bars[0].is_realised is True
-    assert bars[1].is_realised is False
+    assert out == [Premises(fid="p1"), Premises(fid="p2")]
 
-
-async def test_fetch_day_sends_required_cookies_and_version_header() -> None:
-    session = MagicMock()
-    session.get = MagicMock(return_value=_resp(200, _sample_payload()))
-    client = _make_client_with_session(session)
-    await client.async_fetch_day(date(2026, 5, 21))
-
-    call = session.get.call_args
-    url = call.args[0]
-    expected_input = quote(json.dumps(
-        {"premisesFid": "pfid", "index": {"year": 2026, "month": 5, "day": 21}},
-        separators=(",", ":"),
-    ))
-    assert url == (
-        "https://www.fuseenergy.com/api/trpc/premisesDisplayData"
-        f"?input={expected_input}"
-    )
-    assert call.kwargs["headers"]["x-fuse-app-version"] == "5.310"
-    cookies = call.kwargs["cookies"]
-    assert cookies["session_id"] == "sid"
-    assert cookies["app-auth"] == "aa"
+    args, kwargs = session.get.call_args_list[0]
+    assert args[0] == "https://api.fuseenergy.com/api/v2/customer/premises"
+    assert kwargs["headers"]["Authorization"] == "Bearer AT"
+    assert kwargs["headers"]["Device-Id"] == "dev"
 
 
-async def test_reload_required_triggers_one_retry_with_fresh_version() -> None:
-    stalled = _resp(500, {"error": {"data": {"____reloadRequired": True, "httpStatus": 500}}})
-    ok = _resp(200, _sample_payload())
-    session = MagicMock()
-    session.get = MagicMock(side_effect=[stalled, ok])
-
-    resolver = MagicMock(spec=AppVersionResolver)
-    resolver.async_resolve = AsyncMock(side_effect=["stale-1", "fresh-2"])
-    resolver.invalidate = MagicMock()
-
-    client = FuseEnergyApiClient(
-        session=session,
-        session_id="sid",
-        app_auth="aa",
-        premises_fid="pfid",
-        version_resolver=resolver,
-    )
-    bars = await client.async_fetch_day(date(2026, 5, 21))
-    assert bars  # success after retry
-    resolver.invalidate.assert_called_once()
-    assert session.get.call_count == 2
-    # second call used the refreshed version
-    assert session.get.call_args_list[1].kwargs["headers"]["x-fuse-app-version"] == "fresh-2"
+async def test_list_premises_empty_list() -> None:
+    resp = _resp(200, [])
+    client, _ = _client_with_get(resp)
+    assert await client.async_list_premises() == []
 
 
-async def test_reload_required_twice_in_a_row_raises_api_error() -> None:
-    stalled = _resp(500, {"error": {"data": {"____reloadRequired": True, "httpStatus": 500}}})
-    session = MagicMock()
-    session.get = MagicMock(side_effect=[stalled, stalled])
-    client = _make_client_with_session(session)
-
+async def test_list_premises_5xx_raises_api_error() -> None:
+    resp = _resp(503, {})
+    client, _ = _client_with_get(resp)
     with pytest.raises(FuseEnergyApiError):
-        await client.async_fetch_day(date(2026, 5, 21))
+        await client.async_list_premises()
 
 
-async def test_sign_out_required_raises_auth_error() -> None:
-    out = _resp(500, {"error": {"data": {"____signOutRequired": True, "httpStatus": 500}}})
-    session = MagicMock()
-    session.get = MagicMock(return_value=out)
-    client = _make_client_with_session(session)
-
-    with pytest.raises(FuseEnergyApiAuthError):
-        await client.async_fetch_day(date(2026, 5, 21))
-
-
-async def test_http_401_raises_auth_error() -> None:
-    session = MagicMock()
-    session.get = MagicMock(return_value=_resp(401, {"error": {}}))
-    client = _make_client_with_session(session)
-
-    with pytest.raises(FuseEnergyApiAuthError):
-        await client.async_fetch_day(date(2026, 5, 21))
-
-
-async def test_unexpected_500_raises_api_error() -> None:
-    session = MagicMock()
-    session.get = MagicMock(return_value=_resp(500, {"error": {"data": {"httpStatus": 500}}}))
-    client = _make_client_with_session(session)
-
-    with pytest.raises(FuseEnergyApiError) as exc_info:
-        await client.async_fetch_day(date(2026, 5, 21))
-    assert type(exc_info.value) is FuseEnergyApiError
-
-
-async def test_network_error_raises_api_error() -> None:
-    session = MagicMock()
-    session.get = MagicMock(side_effect=aiohttp.ClientError("boom"))
-    client = _make_client_with_session(session)
-
-    with pytest.raises(FuseEnergyApiError):
-        await client.async_fetch_day(date(2026, 5, 21))
-
-
-async def test_version_unavailable_raises_api_error() -> None:
-    from custom_components.fuse_energy.version_resolver import AppVersionUnavailable
-
-    session = MagicMock()
-    resolver = MagicMock(spec=AppVersionResolver)
-    resolver.async_resolve = AsyncMock(side_effect=AppVersionUnavailable("homepage 503"))
-
-    client = FuseEnergyApiClient(
-        session=session,
-        session_id="sid",
-        app_auth="aa",
-        premises_fid="pfid",
-        version_resolver=resolver,
-    )
-
-    with pytest.raises(FuseEnergyApiError) as exc_info:
-        await client.async_fetch_day(date(2026, 5, 21))
-    assert isinstance(exc_info.value.__cause__, AppVersionUnavailable)
-
-
-async def test_null_kwh_or_amount_bars_are_dropped() -> None:
-    payload = {"result": {"data": {"data": {"chart": {
-        "current_index": {"year": 2026, "month": 5, "day": 21, "hour": 23},
-        "supplies": [{
-            "supply_fid": "supply-uuid",
+_CHART_PAYLOAD = {
+    "current_index": {"year": 2026, "month": 5, "day": 25, "hour": 22},
+    "supplies": [
+        {
+            "supply_fid": "supply-1",
             "supply_type": "ELEC_IMPORT",
             "bars": [
-                {"bar": {
-                    "index": {"year": 2026, "month": 5, "day": 21, "hour": 0},
-                    "money": {"amount": "0.03", "currency": "GBP"},
-                    "kWh": None,
-                    "type": "REALISED",
-                }, "breakdown": []},
-                {"bar": {
-                    "index": {"year": 2026, "month": 5, "day": 21, "hour": 1},
-                    "money": {"amount": None, "currency": "GBP"},
-                    "kWh": "0.21",
-                    "type": "REALISED",
-                }, "breakdown": []},
-                {"bar": {
-                    "index": {"year": 2026, "month": 5, "day": 21, "hour": 2},
-                    "money": {"amount": "0.05", "currency": "GBP"},
-                    "kWh": "0.30",
-                    "type": "REALISED",
-                }, "breakdown": []},
+                {
+                    "bar": {
+                        "index": {"year": 2026, "month": 5, "day": 25, "hour": 0},
+                        "money": {"amount": "0.25", "currency": "GBP"},
+                        "kWh": "1.297",
+                        "type": "REALISED",
+                    },
+                    "breakdown": [],
+                },
+                {
+                    "bar": {
+                        "index": {"year": 2026, "month": 5, "day": 25, "hour": 1},
+                        "money": {"amount": "0.18", "currency": "GBP"},
+                        "kWh": "0.900",
+                        "type": "REALISED",
+                    },
+                    "breakdown": [],
+                },
+                {
+                    "bar": {
+                        "index": {"year": 2026, "month": 5, "day": 25, "hour": 23},
+                        "money": {"amount": "0.00", "currency": "GBP"},
+                        "kWh": "0.000",
+                        "type": "FORECAST",
+                    },
+                    "breakdown": [],
+                },
             ],
-        }],
-    }}}}}
+        },
+    ],
+}
 
-    session = MagicMock()
-    session.get = MagicMock(return_value=_resp(200, payload))
-    client = _make_client_with_session(session)
-    bars = await client.async_fetch_day(date(2026, 5, 21))
-    assert [b.local_hour for b in bars] == [2]
+
+async def test_fetch_day_parses_bars_and_filters_non_target_date() -> None:
+    resp = _resp(200, _CHART_PAYLOAD)
+    client, session = _client_with_get(resp)
+
+    bars = await client.async_fetch_day("p1", date(2026, 5, 25))
+
+    assert len(bars) == 3
+    assert bars[0] == HourlyBar(
+        local_date=date(2026, 5, 25), local_hour=0,
+        kwh=Decimal("1.297"), cost_gbp=Decimal("0.25"), is_realised=True,
+    )
+    assert bars[2].is_realised is False  # FORECAST → False
+
+    args, kwargs = session.get.call_args_list[0]
+    assert args[0] == "https://api.fuseenergy.com/api/v1/premises/p1/chart"
+    assert kwargs["params"] == {"year": 2026, "month": 5, "day": 25}
+
+
+async def test_fetch_day_skips_non_elec_supplies() -> None:
+    payload = {
+        "current_index": {"year": 2026, "month": 5, "day": 25, "hour": 22},
+        "supplies": [
+            {"supply_fid": "g", "supply_type": "GAS_IMPORT",
+             "bars": [{"bar": {"index": {"year": 2026, "month": 5, "day": 25, "hour": 0},
+                                "money": {"amount": "1.00", "currency": "GBP"},
+                                "kWh": "1.0", "type": "REALISED"}, "breakdown": []}]},
+        ],
+    }
+    resp = _resp(200, payload)
+    client, _ = _client_with_get(resp)
+    assert await client.async_fetch_day("p1", date(2026, 5, 25)) == []
+
+
+async def test_fetch_day_5xx_raises_api_error() -> None:
+    resp = _resp(500, {})
+    client, _ = _client_with_get(resp)
+    with pytest.raises(FuseEnergyApiError):
+        await client.async_fetch_day("p1", date(2026, 5, 25))
+
+
+async def test_401_then_refresh_then_retry_succeeds() -> None:
+    # Sequence: first GET 401, refresh POST 200, second GET 200.
+    first_get = _resp(401, {})
+    second_get = _resp(200, _CHART_PAYLOAD)
+    refresh = MagicMock()
+    refresh.status = 200
+    refresh.json = AsyncMock(return_value={
+        "access_token": "AT_NEW", "refresh_token": "RT_NEW",
+    })
+    refresh.__aenter__ = AsyncMock(return_value=refresh)
+    refresh.__aexit__ = AsyncMock(return_value=False)
+
+    session = MagicMock(spec=aiohttp.ClientSession)
+    session.get = MagicMock(side_effect=[first_get, second_get])
+    session.post = MagicMock(return_value=refresh)
+
+    persisted: list[TokenPair] = []
+    async def _cb(p): persisted.append(p)
+    client = FuseEnergyApiClient(
+        session=session, device_id="dev",
+        tokens=TokenPair("AT_OLD", "RT_OLD"),
+        on_tokens_refreshed=_cb,
+    )
+
+    bars = await client.async_fetch_day("p1", date(2026, 5, 25))
+
+    assert len(bars) == 3
+    assert client.tokens == TokenPair("AT_NEW", "RT_NEW")
+    assert persisted == [TokenPair("AT_NEW", "RT_NEW")]
+    # Second GET was retried with the NEW access token.
+    second_call_headers = session.get.call_args_list[1].kwargs["headers"]
+    assert second_call_headers["Authorization"] == "Bearer AT_NEW"
+
+
+async def test_401_then_refresh_401_raises_auth_error() -> None:
+    first_get = _resp(401, {})
+    refresh = MagicMock()
+    refresh.status = 401
+    refresh.json = AsyncMock(return_value={"status_string": "refresh_revoked"})
+    refresh.__aenter__ = AsyncMock(return_value=refresh)
+    refresh.__aexit__ = AsyncMock(return_value=False)
+
+    session = MagicMock(spec=aiohttp.ClientSession)
+    session.get = MagicMock(side_effect=[first_get])
+    session.post = MagicMock(return_value=refresh)
+
+    persisted: list[TokenPair] = []
+    async def _cb(p): persisted.append(p)
+    client = FuseEnergyApiClient(
+        session=session, device_id="dev",
+        tokens=TokenPair("AT_OLD", "RT_OLD"),
+        on_tokens_refreshed=_cb,
+    )
+
+    with pytest.raises(FuseEnergyApiAuthError):
+        await client.async_fetch_day("p1", date(2026, 5, 25))
+    assert persisted == []  # never persisted because refresh failed
+    assert client.tokens == TokenPair("AT_OLD", "RT_OLD")  # in-memory untouched
+
+
+async def test_concurrent_callers_share_one_refresh() -> None:
+    import asyncio
+
+    # Both initial GETs 401; one refresh; both retries 200.
+    first_a = _resp(401, {})
+    first_b = _resp(401, {})
+    retry_a = _resp(200, _CHART_PAYLOAD)
+    retry_b = _resp(200, _CHART_PAYLOAD)
+    refresh = MagicMock()
+    refresh.status = 200
+    refresh.json = AsyncMock(return_value={
+        "access_token": "AT_NEW", "refresh_token": "RT_NEW",
+    })
+    refresh.__aenter__ = AsyncMock(return_value=refresh)
+    refresh.__aexit__ = AsyncMock(return_value=False)
+
+    session = MagicMock(spec=aiohttp.ClientSession)
+    session.get = MagicMock(side_effect=[first_a, first_b, retry_a, retry_b])
+    session.post = MagicMock(return_value=refresh)
+
+    persisted: list[TokenPair] = []
+    async def _cb(p): persisted.append(p)
+    client = FuseEnergyApiClient(
+        session=session, device_id="dev",
+        tokens=TokenPair("AT_OLD", "RT_OLD"),
+        on_tokens_refreshed=_cb,
+    )
+
+    a, b = await asyncio.gather(
+        client.async_fetch_day("p1", date(2026, 5, 25)),
+        client.async_fetch_day("p1", date(2026, 5, 25)),
+    )
+    assert len(a) == 3 and len(b) == 3
+    # Only ONE refresh POST despite two 401s.
+    assert session.post.call_count == 1
+    assert persisted == [TokenPair("AT_NEW", "RT_NEW")]

@@ -3,20 +3,39 @@
     "step": {
       "user": {
         "title": "Connect Fuse Energy",
-        "description": "Sign in at https://www.fuseenergy.com, open DevTools → Application → Cookies → https://www.fuseenergy.com, and paste the values of the **session_id** and **app-auth** cookies below. Find your premises ID in the URL after opening a property (https://www.fuseenergy.com/app/premises/<this-uuid>).",
+        "description": "Sign in with your Fuse account phone number. You'll receive a 6-digit code by SMS.",
         "data": {
-          "session_id": "session_id cookie",
-          "app_auth": "app-auth cookie",
-          "premises_fid": "Premises ID"
+          "phone_number": "Phone number (international format, e.g. +447700123456)"
         }
+      },
+      "otp": {
+        "title": "Enter verification code",
+        "description": "We sent a 6-digit code to {phone_number}.",
+        "data": {
+          "verification_code": "Verification code"
+        }
+      },
+      "additional_info": {
+        "title": "{title}",
+        "description": "{subtitle}"
       }
     },
     "error": {
-      "cannot_connect": "Could not reach Fuse Energy. Check your network and try again.",
-      "invalid_auth": "Fuse Energy rejected those cookies. Sign in again and re-copy them."
+      "invalid_phone": "Phone number must be in international format, e.g. +447700123456",
+      "phone_not_recognised": "No Fuse account found for this phone number",
+      "invalid_code": "Incorrect code",
+      "code_expired": "Code expired — request a new one",
+      "too_many_attempts": "Too many attempts. Please request a new code.",
+      "additional_info_mismatch": "Information didn't match Fuse's records",
+      "cannot_connect": "Failed to connect to Fuse",
+      "unsupported_challenge": "Fuse requested an unsupported verification step"
     },
     "abort": {
-      "single_instance_allowed": "Only one Fuse Energy account can be configured."
+      "single_instance_allowed": "Only one Fuse Energy account can be configured.",
+      "reauth_successful": "Re-authentication successful",
+      "no_premises": "No properties found on this Fuse account",
+      "multi_premises": "This account has more than one property; not yet supported",
+      "cannot_connect": "Failed to connect to Fuse"
     }
   }
 }
