@@ -56,6 +56,17 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._additional_info_subtitle: str | None = None
         self._reauth_entry: config_entries.ConfigEntry | None = None
 
+    async def async_step_reauth(
+        self, entry_data: dict[str, Any],
+    ) -> FlowResult:
+        """Entry point HA calls when the coordinator raises
+        ConfigEntryAuthFailed. We re-run async_step_user but mark the flow
+        as a reauth so _async_finalise updates the existing entry."""
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context["entry_id"]
+        )
+        return await self.async_step_user()
+
     async def async_step_user(
         self, user_input: dict[str, Any] | None = None,
     ) -> FlowResult:

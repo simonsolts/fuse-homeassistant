@@ -347,3 +347,64 @@ async def test_additional_info_mismatch_shows_error(
             user_input={"DATE_OF_BIRTH": date(1990, 1, 1)},
         )
     assert result["errors"] == {"base": "additional_info_mismatch"}
+
+
+async def test_reauth_flow_updates_existing_entry(
+    hass, auto_enable_custom_integrations,
+) -> None:
+    """Reauth re-runs phone → OTP → finalise, but ends with
+    async_update_reload_and_abort (not create_entry) and preserves device_id."""
+    from custom_components.fuse_energy.api import Premises
+    from custom_components.fuse_energy.auth import AuthorizedResult, TokenPair
+    from custom_components.fuse_energy.const import (
+        CONF_ACCESS_TOKEN, CONF_DEVICE_ID, CONF_PREMISES_FID, CONF_REFRESH_TOKEN,
+    )
+
+    entry = MockConfigEntry(domain=DOMAIN, data={
+        CONF_PHONE_NUMBER: "+447700900000",
+        CONF_DEVICE_ID: "stable-device-uuid",
+        CONF_ACCESS_TOKEN: "OLD_AT",
+        CONF_REFRESH_TOKEN: "OLD_RT",
+        CONF_PREMISES_FID: "pfid",
+    }, unique_id="fuse_energy_singleton")
+    entry.add_to_hass(hass)
+
+    first = await hass.config_entries.flow.async_init(
+        DOMAIN,
+        context={
+            "source": "reauth", "entry_id": entry.entry_id,
+            "unique_id": entry.unique_id,
+        },
+        data=entry.data,
+    )
+    assert first["step_id"] == "user"
+
+    with patch.object(auth_mod, "async_send_otp", AsyncMock(return_value="FLOW")) as p:
+        otp_step = await hass.config_entries.flow.async_configure(
+            first["flow_id"], user_input={CONF_PHONE_NUMBER: "+447700900000"},
+        )
+    # Reauth must reuse the existing device_id, not generate a fresh one.
+    assert p.call_args.kwargs["device_id"] == "stable-device-uuid"
+    assert otp_step["step_id"] == "otp"
+
+    with (
+        patch.object(
+            auth_mod, "async_verify_otp",
+            AsyncMock(return_value=AuthorizedResult(tokens=TokenPair("NEW_AT", "NEW_RT"))),
+        ),
+        patch(
+            "custom_components.fuse_energy.config_flow."
+            "FuseEnergyApiClient.async_list_premises",
+            AsyncMock(return_value=[Premises(fid="pfid")]),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            otp_step["flow_id"], user_input={"verification_code": "123456"},
+        )
+
+    assert result["type"] == FlowResultType.ABORT
+    assert result["reason"] == "reauth_successful"
+    # Entry was updated in place.
+    assert entry.data[CONF_ACCESS_TOKEN] == "NEW_AT"
+    assert entry.data[CONF_REFRESH_TOKEN] == "NEW_RT"
+    assert entry.data[CONF_DEVICE_ID] == "stable-device-uuid"  # unchanged
