@@ -205,3 +205,59 @@ async def test_verify_otp_raises_transient_on_5xx() -> None:
         await auth_mod.async_verify_otp(
             session, device_id="d", auth_flow_token="F", code="000000",
         )
+
+
+async def test_submit_additional_info_returns_authorized() -> None:
+    resp = _resp(200, {
+        "auth_flow_token": "FLOW",
+        "challenge_type": "AUTHORIZED",
+        "data": {
+            "access_token": "AT2", "refresh_token": "RT2",
+            "is_new_user_created": False,
+        },
+    })
+    session = _session_with_posts(resp)
+
+    result = await auth_mod.async_submit_additional_info(
+        session, device_id="d", auth_flow_token="FLOW_IN",
+        responses={"DATE_OF_BIRTH": "1990-06-20"},
+    )
+
+    assert isinstance(result, auth_mod.AuthorizedResult)
+    assert result.tokens.access_token == "AT2"
+
+    args, kwargs = session.post.call_args_list[0]
+    assert kwargs["json"] == {
+        "challenge_type": "ADDITIONAL_INFO",
+        "data": {"responses": {"DATE_OF_BIRTH": "1990-06-20"}},
+    }
+    assert kwargs["headers"]["Authorization"] == "Bearer FLOW_IN"
+
+
+async def test_submit_additional_info_returns_chained_questions() -> None:
+    resp = _resp(200, {
+        "auth_flow_token": "FLOW2",
+        "challenge_type": "ADDITIONAL_INFO",
+        "data": {
+            "title": "Step 2",
+            "subtitle": "more",
+            "questions": [{"key": "X", "title": "x", "type": "TEXT"}],
+        },
+    })
+    session = _session_with_posts(resp)
+    result = await auth_mod.async_submit_additional_info(
+        session, device_id="d", auth_flow_token="F", responses={"Y": "z"},
+    )
+    assert isinstance(result, auth_mod.AdditionalInfoResult)
+    assert result.auth_flow_token == "FLOW2"
+    assert result.questions[0].type == "TEXT"
+
+
+async def test_submit_additional_info_raises_on_mismatch() -> None:
+    resp = _resp(400, {"status_string": "additional_info_mismatch"})
+    session = _session_with_posts(resp)
+    with pytest.raises(auth_mod.FuseEnergyAuthError) as ei:
+        await auth_mod.async_submit_additional_info(
+            session, device_id="d", auth_flow_token="F", responses={"DOB": "x"},
+        )
+    assert ei.value.error_code == "additional_info_mismatch"

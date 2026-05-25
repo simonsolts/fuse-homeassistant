@@ -198,3 +198,20 @@ async def async_verify_otp(
         bearer=auth_flow_token,
     )
     return _parse_challenge(payload)
+
+
+async def async_submit_additional_info(
+    session: aiohttp.ClientSession, *,
+    device_id: str, auth_flow_token: str, responses: dict[str, str],
+) -> AuthStepResult:
+    """POST /api/v3/auth ADDITIONAL_INFO. Same carriage as async_verify_otp.
+
+    `responses` is keyed by question.key; DATE values must be "YYYY-MM-DD".
+    """
+    payload = await _post_mobile_auth(
+        session,
+        {"challenge_type": "ADDITIONAL_INFO", "data": {"responses": responses}},
+        device_id=device_id,
+        bearer=auth_flow_token,
+    )
+    return _parse_challenge(payload)
