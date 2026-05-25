@@ -76,7 +76,7 @@ async def test_resumes_from_last_statistic_date(
 
     # Resumes from last_imported through today inclusive → 3 days.
     assert client.async_fetch_day.call_count == 3
-    fetched = [c.args[0] for c in client.async_fetch_day.call_args_list]
+    fetched = [c.args[1] for c in client.async_fetch_day.call_args_list]
     assert fetched == [last_imported, last_imported + timedelta(days=1), today_ldn]
 
 

@@ -43,6 +43,13 @@ def _install_broken_module_stubs() -> None:
     pkg_stub.__package__ = _PKG
     sys.modules[_PKG] = pkg_stub
 
+    # Also attach as an attribute on the custom_components namespace package so
+    # that pytest's monkeypatch.setattr("custom_components.fuse_energy.X", ...)
+    # can resolve it via attribute traversal (getattr(custom_components, "fuse_energy")).
+    import custom_components as _cc_pkg  # noqa: PLC0415
+    if not hasattr(_cc_pkg, "fuse_energy"):
+        _cc_pkg.fuse_energy = pkg_stub  # type: ignore[attr-defined]
+
     # Stub out the currently-broken submodules so that any test which imports
     # them doesn't blow up before the real implementations land.
     for submod in ("api", "version_resolver"):

@@ -81,7 +81,9 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
         all_bars: list[HourlyBar] = []
         day = start
         while day <= today:
-            all_bars.extend(await self._client.async_fetch_day(day))
+            all_bars.extend(
+                await self._client.async_fetch_day(self._premises_fid, day)
+            )
             day += timedelta(days=1)
 
         if all_bars:
