@@ -232,3 +232,118 @@ async def test_otp_step_aborts_on_no_premises(
         )
     assert result["type"] == FlowResultType.ABORT
     assert result["reason"] == "no_premises"
+
+
+async def test_additional_info_step_dob_completes_entry(
+    hass, auto_enable_custom_integrations, primed_flow,
+) -> None:
+    from custom_components.fuse_energy.api import Premises
+    from custom_components.fuse_energy.auth import (
+        AdditionalInfoResult, AuthorizedResult, Question, TokenPair,
+    )
+    from datetime import date
+
+    # First: enter OTP step → server says ADDITIONAL_INFO.
+    landed = await primed_flow()
+    with patch.object(
+        auth_mod, "async_verify_otp",
+        AsyncMock(return_value=AdditionalInfoResult(
+            auth_flow_token="FLOW2",
+            title="Verify your date of birth",
+            subtitle="Make sure",
+            questions=[Question(key="DATE_OF_BIRTH", title="DOB", type="DATE")],
+        )),
+    ):
+        ai_step = await hass.config_entries.flow.async_configure(
+            landed["flow_id"], user_input={"verification_code": "123456"},
+        )
+    assert ai_step["step_id"] == "additional_info"
+
+    # Then: submit DOB → server returns AUTHORIZED.
+    with (
+        patch.object(
+            auth_mod, "async_submit_additional_info",
+            AsyncMock(return_value=AuthorizedResult(tokens=TokenPair("AT", "RT"))),
+        ),
+        patch(
+            "custom_components.fuse_energy.config_flow."
+            "FuseEnergyApiClient.async_list_premises",
+            AsyncMock(return_value=[Premises(fid="p")]),
+        ),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            ai_step["flow_id"],
+            user_input={"DATE_OF_BIRTH": date(1990, 6, 20)},
+        )
+
+    assert result["type"] == FlowResultType.CREATE_ENTRY
+    assert result["data"]["access_token"] == "AT"
+
+
+async def test_additional_info_step_chained_questions_rerenders(
+    hass, auto_enable_custom_integrations, primed_flow,
+) -> None:
+    from custom_components.fuse_energy.auth import (
+        AdditionalInfoResult, Question,
+    )
+
+    landed = await primed_flow()
+    with patch.object(
+        auth_mod, "async_verify_otp",
+        AsyncMock(return_value=AdditionalInfoResult(
+            auth_flow_token="FLOW2",
+            title="t", subtitle="s",
+            questions=[Question(key="A", title="a", type="TEXT")],
+        )),
+    ):
+        ai_step = await hass.config_entries.flow.async_configure(
+            landed["flow_id"], user_input={"verification_code": "123456"},
+        )
+
+    with patch.object(
+        auth_mod, "async_submit_additional_info",
+        AsyncMock(return_value=AdditionalInfoResult(
+            auth_flow_token="FLOW3",
+            title="more", subtitle="",
+            questions=[Question(key="B", title="b", type="TEXT")],
+        )),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            ai_step["flow_id"], user_input={"A": "alpha"},
+        )
+    assert result["type"] == FlowResultType.FORM
+    assert result["step_id"] == "additional_info"
+
+
+async def test_additional_info_mismatch_shows_error(
+    hass, auto_enable_custom_integrations, primed_flow,
+) -> None:
+    from custom_components.fuse_energy.auth import (
+        AdditionalInfoResult, Question,
+    )
+    from datetime import date
+
+    landed = await primed_flow()
+    with patch.object(
+        auth_mod, "async_verify_otp",
+        AsyncMock(return_value=AdditionalInfoResult(
+            auth_flow_token="FLOW2",
+            title="t", subtitle="s",
+            questions=[Question(key="DATE_OF_BIRTH", title="DOB", type="DATE")],
+        )),
+    ):
+        ai_step = await hass.config_entries.flow.async_configure(
+            landed["flow_id"], user_input={"verification_code": "123456"},
+        )
+
+    with patch.object(
+        auth_mod, "async_submit_additional_info",
+        AsyncMock(side_effect=auth_mod.FuseEnergyAuthError(
+            "nope", error_code="additional_info_mismatch",
+        )),
+    ):
+        result = await hass.config_entries.flow.async_configure(
+            ai_step["flow_id"],
+            user_input={"DATE_OF_BIRTH": date(1990, 1, 1)},
+        )
+    assert result["errors"] == {"base": "additional_info_mismatch"}

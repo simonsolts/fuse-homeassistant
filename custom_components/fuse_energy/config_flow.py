@@ -175,9 +175,65 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     async def async_step_additional_info(
         self, user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
+        from homeassistant.helpers import selector
+
+        assert self._questions is not None
+
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            responses: dict[str, str] = {}
+            for q in self._questions:
+                raw = user_input.get(q.key)
+                if raw is None:
+                    continue
+                if q.type == "DATE" and hasattr(raw, "isoformat"):
+                    responses[q.key] = raw.isoformat()
+                else:
+                    responses[q.key] = str(raw)
+
+            session = aiohttp_client.async_get_clientsession(self.hass)
+            try:
+                result = await auth_mod.async_submit_additional_info(
+                    session,
+                    device_id=self._device_id,  # type: ignore[arg-type]
+                    auth_flow_token=self._auth_flow_token,  # type: ignore[arg-type]
+                    responses=responses,
+                )
+            except auth_mod.FuseEnergyAuthError as e:
+                errors["base"] = e.error_code
+            except auth_mod.FuseEnergyAuthTransient:
+                errors["base"] = "cannot_connect"
+            else:
+                if isinstance(result, AuthorizedResult):
+                    return await self._async_finalise(result.tokens)
+                if isinstance(result, AdditionalInfoResult):
+                    self._auth_flow_token = result.auth_flow_token
+                    self._questions = result.questions
+                    self._additional_info_title = result.title
+                    self._additional_info_subtitle = result.subtitle
+                    return await self.async_step_additional_info()
+
+        # Build dynamic schema from the question list.
+        fields: dict = {}
+        for q in self._questions:
+            if q.type == "DATE":
+                fields[vol.Required(q.key)] = selector.DateSelector()
+            else:
+                if q.type != "TEXT":
+                    _LOGGER.warning(
+                        "unknown additional-info question type %r for key %r; rendering as text",
+                        q.type, q.key,
+                    )
+                fields[vol.Required(q.key)] = str
+
         return self.async_show_form(
             step_id="additional_info",
-            data_schema=vol.Schema({}),
+            data_schema=vol.Schema(fields),
+            errors=errors,
+            description_placeholders={
+                "title": getattr(self, "_additional_info_title", "") or "",
+                "subtitle": getattr(self, "_additional_info_subtitle", "") or "",
+            },
         )
 
 
