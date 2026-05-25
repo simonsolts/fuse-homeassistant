@@ -261,3 +261,49 @@ async def test_submit_additional_info_raises_on_mismatch() -> None:
             session, device_id="d", auth_flow_token="F", responses={"DOB": "x"},
         )
     assert ei.value.error_code == "additional_info_mismatch"
+
+
+async def test_refresh_rotates_both_tokens() -> None:
+    resp = _resp(200, {
+        "access_token": "AT_NEW",
+        "refresh_token": "RT_NEW",
+    })
+    session = _session_with_posts(resp)
+
+    new_pair = await auth_mod.async_refresh(
+        session,
+        device_id="d",
+        tokens=auth_mod.TokenPair("AT_OLD", "RT_OLD"),
+    )
+
+    assert new_pair == auth_mod.TokenPair("AT_NEW", "RT_NEW")
+
+    args, kwargs = session.post.call_args_list[0]
+    assert args[0] == "https://api.fuseenergy.com/api/v1/auth/refresh"
+    # Authorization carries the OLD access token; body carries the OLD refresh token
+    assert kwargs["headers"]["Authorization"] == "Bearer AT_OLD"
+    assert kwargs["headers"]["Device-Id"] == "d"
+    assert kwargs["json"] == {
+        "refresh_token": "RT_OLD",
+        "original_request_path": None,
+    }
+
+
+async def test_refresh_raises_auth_error_on_401() -> None:
+    resp = _resp(401, {"status_string": "invalid_access_token"})
+    session = _session_with_posts(resp)
+    with pytest.raises(auth_mod.FuseEnergyAuthError):
+        await auth_mod.async_refresh(
+            session, device_id="d",
+            tokens=auth_mod.TokenPair("AT", "RT"),
+        )
+
+
+async def test_refresh_raises_transient_on_5xx() -> None:
+    resp = _resp(500, {})
+    session = _session_with_posts(resp)
+    with pytest.raises(auth_mod.FuseEnergyAuthTransient):
+        await auth_mod.async_refresh(
+            session, device_id="d",
+            tokens=auth_mod.TokenPair("AT", "RT"),
+        )

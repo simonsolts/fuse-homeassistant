@@ -215,3 +215,48 @@ async def async_submit_additional_info(
         bearer=auth_flow_token,
     )
     return _parse_challenge(payload)
+
+
+async def async_refresh(
+    session: aiohttp.ClientSession, *,
+    device_id: str, tokens: TokenPair,
+) -> TokenPair:
+    """POST /api/v1/auth/refresh.
+
+    Both tokens rotate on every successful refresh. The endpoint requires
+    the CURRENT (about-to-expire) access_token in the Authorization header
+    AND the refresh_token in the body — the mobile app's OkHttp
+    Authenticator passes both.
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "Device-Id": device_id,
+        "Authorization": f"Bearer {tokens.access_token}",
+    }
+    body = {
+        "refresh_token": tokens.refresh_token,
+        "original_request_path": None,
+    }
+    try:
+        async with session.post(
+            f"{FUSE_API_BASE_URL}/api/v1/auth/refresh",
+            json=body, headers=headers, timeout=_TIMEOUT,
+        ) as r:
+            if 200 <= r.status < 300:
+                payload = await r.json()
+                return TokenPair(
+                    access_token=payload["access_token"],
+                    refresh_token=payload["refresh_token"],
+                )
+            if 500 <= r.status:
+                raise FuseEnergyAuthTransient(
+                    f"server {r.status} from /api/v1/auth/refresh"
+                )
+            payload = await r.json()
+            code = (payload or {}).get("status_string", "refresh_failed")
+            raise FuseEnergyAuthError(
+                f"refresh failed HTTP {r.status}: {payload}",
+                error_code=code,
+            )
+    except aiohttp.ClientError as e:
+        raise FuseEnergyAuthTransient(f"network: {e}") from e
