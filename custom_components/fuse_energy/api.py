@@ -111,8 +111,11 @@ class FuseEnergyApiClient:
 
     async def _get(self, path: str, **kw) -> dict | list:
         # Defer to _request, but use session.get to keep test seams simple.
+        # Capture the token we're about to use so _refresh_tokens can detect
+        # whether a concurrent caller already refreshed on our behalf.
+        stale_token = self._tokens.access_token
         headers = {
-            "Authorization": f"Bearer {self._tokens.access_token}",
+            "Authorization": f"Bearer {stale_token}",
             "Device-Id": self._device_id,
         }
         try:
@@ -121,8 +124,14 @@ class FuseEnergyApiClient:
                 headers=headers, timeout=_TIMEOUT, **kw,
             ) as r:
                 if r.status == 401:
-                    await self._refresh_tokens()
-                    headers["Authorization"] = f"Bearer {self._tokens.access_token}"
+                    # Yield once so sibling tasks can reach the same 401 branch
+                    # before any refresh starts, maximising deduplication.
+                    await asyncio.sleep(0)
+                    await self._refresh_tokens(stale_token)
+                    headers = {
+                        "Authorization": f"Bearer {self._tokens.access_token}",
+                        "Device-Id": self._device_id,
+                    }
                     async with self._session.get(
                         f"{FUSE_API_BASE_URL}{path}",
                         headers=headers, timeout=_TIMEOUT, **kw,
@@ -142,12 +151,18 @@ class FuseEnergyApiClient:
         except aiohttp.ClientError as e:
             raise FuseEnergyApiError(f"network: {e}") from e
 
-    async def _refresh_tokens(self) -> None:
+    async def _refresh_tokens(self, stale_token: str) -> None:
         """Refresh the token pair, serialised so concurrent ticks share one
-        refresh. Persists via on_tokens_refreshed BEFORE swapping in-memory."""
-        snapshot = self._tokens.access_token
+        refresh. Guards by stale_token so both the concurrent-waiter case
+        (blocked on the lock while another caller refreshed) and the
+        sequential case (caller started after refresh completed) are handled:
+        if the current access_token is no longer stale_token the refresh
+        already happened and we skip it.
+
+        Persists via on_tokens_refreshed BEFORE swapping in-memory.
+        """
         async with self._refresh_lock:
-            if self._tokens.access_token != snapshot:
+            if self._tokens.access_token != stale_token:
                 return  # another caller already refreshed
             try:
                 new_tokens = await async_refresh(

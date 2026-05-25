@@ -180,3 +180,101 @@ async def test_fetch_day_5xx_raises_api_error() -> None:
     client, _ = _client_with_get(resp)
     with pytest.raises(FuseEnergyApiError):
         await client.async_fetch_day("p1", date(2026, 5, 25))
+
+
+async def test_401_then_refresh_then_retry_succeeds() -> None:
+    # Sequence: first GET 401, refresh POST 200, second GET 200.
+    first_get = _resp(401, {})
+    second_get = _resp(200, _CHART_PAYLOAD)
+    refresh = MagicMock()
+    refresh.status = 200
+    refresh.json = AsyncMock(return_value={
+        "access_token": "AT_NEW", "refresh_token": "RT_NEW",
+    })
+    refresh.__aenter__ = AsyncMock(return_value=refresh)
+    refresh.__aexit__ = AsyncMock(return_value=False)
+
+    session = MagicMock(spec=aiohttp.ClientSession)
+    session.get = MagicMock(side_effect=[first_get, second_get])
+    session.post = MagicMock(return_value=refresh)
+
+    persisted: list[TokenPair] = []
+    async def _cb(p): persisted.append(p)
+    client = FuseEnergyApiClient(
+        session=session, device_id="dev",
+        tokens=TokenPair("AT_OLD", "RT_OLD"),
+        on_tokens_refreshed=_cb,
+    )
+
+    bars = await client.async_fetch_day("p1", date(2026, 5, 25))
+
+    assert len(bars) == 3
+    assert client.tokens == TokenPair("AT_NEW", "RT_NEW")
+    assert persisted == [TokenPair("AT_NEW", "RT_NEW")]
+    # Second GET was retried with the NEW access token.
+    second_call_headers = session.get.call_args_list[1].kwargs["headers"]
+    assert second_call_headers["Authorization"] == "Bearer AT_NEW"
+
+
+async def test_401_then_refresh_401_raises_auth_error() -> None:
+    first_get = _resp(401, {})
+    refresh = MagicMock()
+    refresh.status = 401
+    refresh.json = AsyncMock(return_value={"status_string": "refresh_revoked"})
+    refresh.__aenter__ = AsyncMock(return_value=refresh)
+    refresh.__aexit__ = AsyncMock(return_value=False)
+
+    session = MagicMock(spec=aiohttp.ClientSession)
+    session.get = MagicMock(side_effect=[first_get])
+    session.post = MagicMock(return_value=refresh)
+
+    persisted: list[TokenPair] = []
+    async def _cb(p): persisted.append(p)
+    client = FuseEnergyApiClient(
+        session=session, device_id="dev",
+        tokens=TokenPair("AT_OLD", "RT_OLD"),
+        on_tokens_refreshed=_cb,
+    )
+
+    with pytest.raises(FuseEnergyApiAuthError):
+        await client.async_fetch_day("p1", date(2026, 5, 25))
+    assert persisted == []  # never persisted because refresh failed
+    assert client.tokens == TokenPair("AT_OLD", "RT_OLD")  # in-memory untouched
+
+
+async def test_concurrent_callers_share_one_refresh() -> None:
+    import asyncio
+
+    # Both initial GETs 401; one refresh; both retries 200.
+    first_a = _resp(401, {})
+    first_b = _resp(401, {})
+    retry_a = _resp(200, _CHART_PAYLOAD)
+    retry_b = _resp(200, _CHART_PAYLOAD)
+    refresh = MagicMock()
+    refresh.status = 200
+    refresh.json = AsyncMock(return_value={
+        "access_token": "AT_NEW", "refresh_token": "RT_NEW",
+    })
+    refresh.__aenter__ = AsyncMock(return_value=refresh)
+    refresh.__aexit__ = AsyncMock(return_value=False)
+
+    session = MagicMock(spec=aiohttp.ClientSession)
+    session.get = MagicMock(side_effect=[first_a, first_b, retry_a, retry_b])
+    session.post = MagicMock(return_value=refresh)
+
+    persisted: list[TokenPair] = []
+    async def _cb(p): persisted.append(p)
+    client = FuseEnergyApiClient(
+        session=session, device_id="dev",
+        tokens=TokenPair("AT_OLD", "RT_OLD"),
+        on_tokens_refreshed=_cb,
+    )
+
+    a, b = await asyncio.gather(
+        client.async_fetch_day("p1", date(2026, 5, 25)),
+        client.async_fetch_day("p1", date(2026, 5, 25)),
+    )
+    assert len(a) == 3 and len(b) == 3
+    # Only ONE refresh POST despite two 401s.
+    assert session.post.call_count == 1
+    assert persisted == [TokenPair("AT_NEW", "RT_NEW")]
