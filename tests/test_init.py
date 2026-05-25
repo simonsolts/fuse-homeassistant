@@ -15,13 +15,20 @@ from pytest_homeassistant_custom_component.common import MockConfigEntry
 
 from custom_components.fuse_energy.api import HourlyBar
 from custom_components.fuse_energy.const import (
-    CONF_APP_AUTH,
+    CONF_ACCESS_TOKEN,
+    CONF_DEVICE_ID,
+    CONF_PHONE_NUMBER,
     CONF_PREMISES_FID,
-    CONF_SESSION_ID,
+    CONF_REFRESH_TOKEN,
     DOMAIN,
 )
 
-_DATA = {CONF_SESSION_ID: "sid", CONF_APP_AUTH: "aa", CONF_PREMISES_FID: "pfid"}
+_DATA = {
+    CONF_DEVICE_ID: "dev-uuid",
+    CONF_ACCESS_TOKEN: "AT",
+    CONF_REFRESH_TOKEN: "RT",
+    CONF_PREMISES_FID: "pfid",
+}
 
 
 def test_const_exposes_domain() -> None:
@@ -50,20 +57,19 @@ def test_const_exposes_new_config_keys_and_stat_templates() -> None:
     const = importlib.util.module_from_spec(spec)  # type: ignore[arg-type]
     spec.loader.exec_module(const)  # type: ignore[union-attr]
 
-    assert const.CONF_SESSION_ID == "session_id"
-    assert const.CONF_APP_AUTH == "app_auth"
+    assert const.CONF_DEVICE_ID == "device_id"
+    assert const.CONF_ACCESS_TOKEN == "access_token"
+    assert const.CONF_REFRESH_TOKEN == "refresh_token"
     assert const.CONF_PREMISES_FID == "premises_fid"
 
-    assert const.FUSE_BASE_URL == "https://www.fuseenergy.com"
-    assert const.FUSE_TRPC_PATH == "/api/trpc"
+    assert const.FUSE_API_BASE_URL == "https://api.fuseenergy.com"
+    assert const.FUSE_WEB_BASE_URL == "https://www.fuseenergy.com"
 
     # UUID-format fids contain hyphens which are invalid in HA statistic_ids;
     # the helpers must sanitize them to underscores.
     fid = "abc12345-1234-1234-1234-abcdef123456"
     assert const.stat_id_consumption(fid) == "fuse_energy:elec_consumption_abc12345_1234_1234_1234_abcdef123456"
     assert const.stat_id_cost(fid) == "fuse_energy:elec_cost_abc12345_1234_1234_1234_abcdef123456"
-
-    assert isinstance(const.FALLBACK_APP_VERSION, str) and const.FALLBACK_APP_VERSION
 
 
 async def test_setup_and_unload_entry(
@@ -104,3 +110,45 @@ async def test_setup_and_unload_entry(
         assert await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
         assert entry.state == ConfigEntryState.NOT_LOADED
+
+
+async def test_persist_tokens_callback_updates_entry_data(
+    hass: HomeAssistant, auto_enable_custom_integrations,
+) -> None:
+    """Setting up the entry should wire a callback that writes new tokens
+    into entry.data, leaving other keys untouched."""
+    from custom_components.fuse_energy.auth import TokenPair
+
+    entry = MockConfigEntry(domain=DOMAIN, data=_DATA, entry_id="e1")
+    entry.add_to_hass(hass)
+
+    fake_session = MagicMock(spec=aiohttp.ClientSession)
+    with (
+        patch(
+            "custom_components.fuse_energy.aiohttp_client.async_get_clientsession",
+            return_value=fake_session,
+        ),
+        patch(
+            "custom_components.fuse_energy.coordinator."
+            "FuseEnergyDataUpdateCoordinator.async_config_entry_first_refresh"
+        ),
+        patch(
+            "custom_components.fuse_energy.FuseEnergyApiClient"
+        ) as ClientCls,
+    ):
+        await hass.config_entries.async_setup(entry.entry_id)
+        await hass.async_block_till_done()
+
+        # Grab the callback that __init__.py passed to the client.
+        kwargs = ClientCls.call_args.kwargs
+        cb = kwargs["on_tokens_refreshed"]
+
+        await cb(TokenPair("AT_NEW", "RT_NEW"))
+
+        assert entry.data[CONF_ACCESS_TOKEN] == "AT_NEW"
+        assert entry.data[CONF_REFRESH_TOKEN] == "RT_NEW"
+        assert entry.data[CONF_DEVICE_ID] == "dev-uuid"  # untouched
+        assert entry.data[CONF_PREMISES_FID] == "pfid"   # untouched
+
+        await hass.config_entries.async_unload(entry.entry_id)
+        await hass.async_block_till_done()
