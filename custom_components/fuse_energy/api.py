@@ -78,8 +78,9 @@ class FuseEnergyApiClient:
         On 5xx / network, raise FuseEnergyApiError.
         """
         for attempt in (0, 1):
+            stale_token = self._tokens.access_token
             headers = {
-                "Authorization": f"Bearer {self._tokens.access_token}",
+                "Authorization": f"Bearer {stale_token}",
                 "Device-Id": self._device_id,
                 **kw.pop("headers", {}),
             }
@@ -93,7 +94,7 @@ class FuseEnergyApiClient:
                             raise FuseEnergyApiAuthError(
                                 "401 even after refresh"
                             )
-                        await self._refresh_tokens()
+                        await self._refresh_tokens(stale_token)
                         continue
                     if 500 <= r.status:
                         raise FuseEnergyApiError(
