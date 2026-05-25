@@ -179,3 +179,54 @@ class FuseEnergyApiClient:
                 continue
             out.append(Premises(fid=fid))
         return out
+
+    async def async_fetch_day(
+        self, premises_fid: str, local_date: date,
+    ) -> list[HourlyBar]:
+        """GET /api/v1/premises/{premises_fid}/chart?year=Y&month=M&day=D.
+
+        Response shape (flat — no tRPC wrapping):
+          {"current_index": {...}, "supplies": [{"supply_fid", "supply_type",
+                                                  "bars": [{"bar": {...}, "breakdown": [...]}]}, ...]}
+        """
+        data = await self._get(
+            f"/api/v1/premises/{premises_fid}/chart",
+            params={
+                "year": local_date.year,
+                "month": local_date.month,
+                "day": local_date.day,
+            },
+        )
+        if not isinstance(data, dict):
+            raise FuseEnergyApiError(f"unexpected chart shape: {type(data)}")
+        return _parse_bars(data, local_date)
+
+
+def _parse_bars(payload: dict, local_date: date) -> list[HourlyBar]:
+    """Extract ELEC_IMPORT bars matching local_date from the chart payload."""
+    bars: list[HourlyBar] = []
+    for supply in payload.get("supplies") or ():
+        if supply.get("supply_type") != "ELEC_IMPORT":
+            continue
+        for entry in supply.get("bars") or ():
+            bar = entry.get("bar") or {}
+            idx = bar.get("index") or {}
+            if (idx.get("year"), idx.get("month"), idx.get("day")) != (
+                local_date.year, local_date.month, local_date.day,
+            ):
+                continue
+            kwh_raw = bar.get("kWh")
+            amount_raw = (bar.get("money") or {}).get("amount")
+            if kwh_raw is None or amount_raw is None:
+                continue
+            bars.append(
+                HourlyBar(
+                    local_date=local_date,
+                    local_hour=int(idx.get("hour", 0)),
+                    kwh=Decimal(str(kwh_raw)),
+                    cost_gbp=Decimal(str(amount_raw)),
+                    is_realised=bar.get("type") == "REALISED",
+                )
+            )
+    bars.sort(key=lambda b: b.local_hour)
+    return bars

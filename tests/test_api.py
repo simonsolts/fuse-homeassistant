@@ -100,3 +100,83 @@ async def test_list_premises_5xx_raises_api_error() -> None:
     client, _ = _client_with_get(resp)
     with pytest.raises(FuseEnergyApiError):
         await client.async_list_premises()
+
+
+_CHART_PAYLOAD = {
+    "current_index": {"year": 2026, "month": 5, "day": 25, "hour": 22},
+    "supplies": [
+        {
+            "supply_fid": "supply-1",
+            "supply_type": "ELEC_IMPORT",
+            "bars": [
+                {
+                    "bar": {
+                        "index": {"year": 2026, "month": 5, "day": 25, "hour": 0},
+                        "money": {"amount": "0.25", "currency": "GBP"},
+                        "kWh": "1.297",
+                        "type": "REALISED",
+                    },
+                    "breakdown": [],
+                },
+                {
+                    "bar": {
+                        "index": {"year": 2026, "month": 5, "day": 25, "hour": 1},
+                        "money": {"amount": "0.18", "currency": "GBP"},
+                        "kWh": "0.900",
+                        "type": "REALISED",
+                    },
+                    "breakdown": [],
+                },
+                {
+                    "bar": {
+                        "index": {"year": 2026, "month": 5, "day": 25, "hour": 23},
+                        "money": {"amount": "0.00", "currency": "GBP"},
+                        "kWh": "0.000",
+                        "type": "FORECAST",
+                    },
+                    "breakdown": [],
+                },
+            ],
+        },
+    ],
+}
+
+
+async def test_fetch_day_parses_bars_and_filters_non_target_date() -> None:
+    resp = _resp(200, _CHART_PAYLOAD)
+    client, session = _client_with_get(resp)
+
+    bars = await client.async_fetch_day("p1", date(2026, 5, 25))
+
+    assert len(bars) == 3
+    assert bars[0] == HourlyBar(
+        local_date=date(2026, 5, 25), local_hour=0,
+        kwh=Decimal("1.297"), cost_gbp=Decimal("0.25"), is_realised=True,
+    )
+    assert bars[2].is_realised is False  # FORECAST → False
+
+    args, kwargs = session.get.call_args_list[0]
+    assert args[0] == "https://api.fuseenergy.com/api/v1/premises/p1/chart"
+    assert kwargs["params"] == {"year": 2026, "month": 5, "day": 25}
+
+
+async def test_fetch_day_skips_non_elec_supplies() -> None:
+    payload = {
+        "current_index": {"year": 2026, "month": 5, "day": 25, "hour": 22},
+        "supplies": [
+            {"supply_fid": "g", "supply_type": "GAS_IMPORT",
+             "bars": [{"bar": {"index": {"year": 2026, "month": 5, "day": 25, "hour": 0},
+                                "money": {"amount": "1.00", "currency": "GBP"},
+                                "kWh": "1.0", "type": "REALISED"}, "breakdown": []}]},
+        ],
+    }
+    resp = _resp(200, payload)
+    client, _ = _client_with_get(resp)
+    assert await client.async_fetch_day("p1", date(2026, 5, 25)) == []
+
+
+async def test_fetch_day_5xx_raises_api_error() -> None:
+    resp = _resp(500, {})
+    client, _ = _client_with_get(resp)
+    with pytest.raises(FuseEnergyApiError):
+        await client.async_fetch_day("p1", date(2026, 5, 25))
