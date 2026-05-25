@@ -47,23 +47,6 @@ def _install_broken_module_stubs() -> None:
     # (including from an executor thread via HA's loader) returns a no-op
     # module rather than an ImportError.
 
-    # config_flow: needs a registered ConfigFlow handler so that HA's
-    # async_migrate path (called during entry setup) doesn't log an error
-    # and abort.  The handler is a no-op; the real one lands in Task 13.
-    _CF_KEY = f"{_PKG}.config_flow"
-    if _CF_KEY not in sys.modules:
-        from homeassistant import config_entries as _ce  # noqa: PLC0415
-        from custom_components.fuse_energy.const import DOMAIN as _DOMAIN  # noqa: PLC0415
-
-        class _StubConfigFlow(_ce.ConfigFlow, domain=_DOMAIN):  # type: ignore[call-arg]
-            """Placeholder handler registered until config_flow.py is repaired."""
-            VERSION = 1
-
-        cf_stub = types.ModuleType(_CF_KEY)
-        cf_stub.__package__ = _PKG
-        cf_stub.FuseEnergyConfigFlow = _StubConfigFlow  # type: ignore[attr-defined]
-        sys.modules[_CF_KEY] = cf_stub
-
     for submod in ("version_resolver",):
         fq = f"{_PKG}.{submod}"
         if fq not in sys.modules:

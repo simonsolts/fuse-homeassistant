@@ -76,7 +76,7 @@ async def test_setup_and_unload_entry(
     recorder_mock, hass: HomeAssistant, auto_enable_custom_integrations
 ) -> None:
     entry = MockConfigEntry(
-        domain=DOMAIN, data=_DATA, unique_id="fuse_energy_singleton"
+        domain=DOMAIN, data=_DATA, unique_id="fuse_energy_singleton", version=2,
     )
     entry.add_to_hass(hass)
 
@@ -119,7 +119,7 @@ async def test_persist_tokens_callback_updates_entry_data(
     into entry.data, leaving other keys untouched."""
     from custom_components.fuse_energy.auth import TokenPair
 
-    entry = MockConfigEntry(domain=DOMAIN, data=_DATA, entry_id="e1")
+    entry = MockConfigEntry(domain=DOMAIN, data=_DATA, entry_id="e1", version=2)
     entry.add_to_hass(hass)
 
     fake_session = MagicMock(spec=aiohttp.ClientSession)
