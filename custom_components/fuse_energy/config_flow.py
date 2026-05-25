@@ -18,6 +18,12 @@ from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import aiohttp_client
 
 from . import auth as auth_mod
+from .api import FuseEnergyApiClient
+from .auth import (
+    AdditionalInfoResult,
+    AuthorizedResult,
+    TokenPair,
+)
 from .const import (
     CONF_ACCESS_TOKEN,
     CONF_DEVICE_ID,
@@ -46,6 +52,8 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._device_id: str | None = None
         self._auth_flow_token: str | None = None
         self._questions: list[auth_mod.Question] | None = None
+        self._additional_info_title: str | None = None
+        self._additional_info_subtitle: str | None = None
         self._reauth_entry: config_entries.ConfigEntry | None = None
 
     async def async_step_user(
@@ -88,10 +96,92 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             step_id="user", data_schema=_USER_SCHEMA, errors=errors,
         )
 
+    _OTP_SCHEMA = vol.Schema({vol.Required("verification_code"): str})
+
     async def async_step_otp(
         self, user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
+        errors: dict[str, str] = {}
+        if user_input is not None:
+            assert self._auth_flow_token is not None
+            assert self._device_id is not None
+            code = user_input["verification_code"].strip()
+            session = aiohttp_client.async_get_clientsession(self.hass)
+            try:
+                result = await auth_mod.async_verify_otp(
+                    session,
+                    device_id=self._device_id,
+                    auth_flow_token=self._auth_flow_token,
+                    code=code,
+                )
+            except auth_mod.FuseEnergyAuthError as e:
+                errors["base"] = e.error_code
+            except auth_mod.FuseEnergyAuthTransient:
+                errors["base"] = "cannot_connect"
+            else:
+                if isinstance(result, AuthorizedResult):
+                    return await self._async_finalise(result.tokens)
+                if isinstance(result, AdditionalInfoResult):
+                    self._auth_flow_token = result.auth_flow_token
+                    self._questions = result.questions
+                    self._additional_info_title = result.title
+                    self._additional_info_subtitle = result.subtitle
+                    return await self.async_step_additional_info()
+
         return self.async_show_form(
             step_id="otp",
-            data_schema=vol.Schema({vol.Required("verification_code"): str}),
+            data_schema=self._OTP_SCHEMA,
+            errors=errors,
+            description_placeholders={"phone_number": self._phone_number or ""},
         )
+
+    async def _async_finalise(self, tokens: TokenPair) -> FlowResult:
+        """Discover premises and either create the entry or reload an existing one."""
+        assert self._device_id is not None
+        session = aiohttp_client.async_get_clientsession(self.hass)
+        client = FuseEnergyApiClient(
+            session=session,
+            device_id=self._device_id,
+            tokens=tokens,
+            on_tokens_refreshed=_noop_persist,
+        )
+        try:
+            premises = await client.async_list_premises()
+        except Exception as e:
+            _LOGGER.warning("premises discovery failed: %s", e)
+            return self.async_abort(reason="cannot_connect")
+
+        if not premises:
+            return self.async_abort(reason="no_premises")
+        if len(premises) > 1:
+            return self.async_abort(reason="multi_premises")
+
+        data = {
+            CONF_PHONE_NUMBER: self._phone_number,
+            CONF_DEVICE_ID: self._device_id,
+            CONF_ACCESS_TOKEN: tokens.access_token,
+            CONF_REFRESH_TOKEN: tokens.refresh_token,
+            CONF_PREMISES_FID: premises[0].fid,
+        }
+
+        if self._reauth_entry is not None:
+            return self.async_update_reload_and_abort(
+                self._reauth_entry, data=data,
+                reason="reauth_successful",
+            )
+
+        return self.async_create_entry(title="Fuse Energy", data=data)
+
+    async def async_step_additional_info(
+        self, user_input: dict[str, Any] | None = None,
+    ) -> FlowResult:
+        return self.async_show_form(
+            step_id="additional_info",
+            data_schema=vol.Schema({}),
+        )
+
+
+async def _noop_persist(_tokens: TokenPair) -> None:
+    """Used during config-flow premises discovery — no refresh should happen
+    with brand-new tokens, but if it did we'd just drop the result here."""
+    return None
