@@ -111,9 +111,16 @@ async def test_api_error_translates_to_update_failed(
 
 
 async def test_snapshot_holds_latest_realised_bar(
-    recorder_mock, hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch,
+    recorder_mock,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    freezer,
 ) -> None:
-    today = datetime.now(LDN).date()
+    # Freeze well past hour 11 local so h10/h11 are fully elapsed; the test
+    # is about snapshot picking the latest realised+complete bar, not about
+    # the in-progress filter.
+    freezer.move_to("2026-05-26T18:00:00+00:00")
+    today = date(2026, 5, 26)
     monkeypatch.setattr(
         "custom_components.fuse_energy.coordinator._async_last_imported_date",
         AsyncMock(return_value=today),
@@ -129,3 +136,50 @@ async def test_snapshot_holds_latest_realised_bar(
     snap = await coord._async_update_data()
     assert snap.last_hour_kwh == pytest.approx(0.7)
     assert snap.last_hour_cost_gbp == pytest.approx(0.2)
+
+
+async def test_in_progress_hour_excluded_from_writer_and_snapshot(
+    recorder_mock,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
+    freezer,
+) -> None:
+    """Fuse's mobile API marks the current (in-progress) hour as REALISED with
+    a growing partial value. If we let that partial reach the statistics
+    writer, the row gets locked at the partial value forever (subsequent
+    ticks skip it via the start_ts <= last_start_ts check). So the
+    coordinator must exclude any bar whose hour hasn't fully elapsed."""
+    # Freeze to 2026-05-26 10:30 UTC == 11:30 Europe/London (BST = UTC+1).
+    # Hours 0-10 local are fully elapsed; hour 11 is in progress.
+    freezer.move_to("2026-05-26T10:30:00+00:00")
+    today = date(2026, 5, 26)
+
+    bars = [
+        _bar(today, h, kwh="1.0", cost="0.1", realised=True) for h in range(11)
+    ]
+    # h11 is the in-progress hour with a partial value Fuse marked REALISED.
+    bars.append(_bar(today, 11, kwh="0.128", cost="0.03", realised=True))
+
+    monkeypatch.setattr(
+        "custom_components.fuse_energy.coordinator._async_last_imported_date",
+        AsyncMock(return_value=today),
+    )
+    importer = AsyncMock()
+    monkeypatch.setattr(
+        "custom_components.fuse_energy.coordinator.async_import_hourly_bars",
+        importer,
+    )
+    client = MagicMock(spec=FuseEnergyApiClient)
+    client.async_fetch_day = AsyncMock(return_value=bars)
+
+    coord = _make_coord(hass, client)
+    snap = await coord._async_update_data()
+
+    # Writer must NOT have been handed the in-progress h11 bar.
+    importer.assert_called_once()
+    passed = importer.call_args.args[2]
+    assert {b.local_hour for b in passed} == set(range(11))
+
+    # Snapshot reflects h10 (last fully-elapsed hour), not h11's partial.
+    assert snap.last_hour_kwh == pytest.approx(1.0)
+    assert snap.last_hour_cost_gbp == pytest.approx(0.1)

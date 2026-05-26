@@ -65,7 +65,8 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
             raise UpdateFailed(str(err)) from err
 
     async def _do_tick(self) -> FuseEnergySnapshot | None:
-        today = datetime.now(_FUSE_TZ).date()
+        now_utc = datetime.now(UTC)
+        today = now_utc.astimezone(_FUSE_TZ).date()
         last_imported = await _async_last_imported_date(self.hass, self._premises_fid)
         if last_imported is None:
             start = today - timedelta(days=_INITIAL_BACKFILL_DAYS)
@@ -90,25 +91,36 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
             )
             day += timedelta(days=1)
 
-        realised_count = sum(1 for b in all_bars if b.is_realised)
+        # Fuse's mobile API marks the current (in-progress) hour as REALISED
+        # with a growing partial value. If we pass that to the writer the row
+        # gets locked at the partial value forever (subsequent ticks skip it
+        # via start_ts <= last_start_ts). Only consider bars whose local hour
+        # has fully elapsed.
+        complete_bars = [b for b in all_bars if _bar_end_utc(b) <= now_utc]
+
+        realised_count = sum(1 for b in complete_bars if b.is_realised)
         _LOGGER.warning(
-            "[fuse-diag] collected %d bars total, %d realised. Last 3 realised=%s",
+            "[fuse-diag] collected %d bars total, %d complete, %d realised+complete. "
+            "Last 3 realised+complete=%s",
             len(all_bars),
+            len(complete_bars),
             realised_count,
             [
                 f"{b.local_date} h{b.local_hour:02d} kwh={b.kwh}"
                 for b in sorted(
-                    (b for b in all_bars if b.is_realised),
+                    (b for b in complete_bars if b.is_realised),
                     key=lambda b: (b.local_date, b.local_hour),
                 )[-3:]
             ],
         )
 
-        if all_bars:
-            await async_import_hourly_bars(self.hass, self._premises_fid, all_bars)
+        if complete_bars:
+            await async_import_hourly_bars(
+                self.hass, self._premises_fid, complete_bars
+            )
 
         latest_realised: HourlyBar | None = None
-        for bar in all_bars:
+        for bar in complete_bars:
             if bar.is_realised and (
                 latest_realised is None
                 or (bar.local_date, bar.local_hour)
@@ -129,6 +141,19 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
             last_hour_kwh=float(latest_realised.kwh),
             last_hour_cost_gbp=float(latest_realised.cost_gbp),
         )
+
+
+def _bar_end_utc(bar: HourlyBar) -> datetime:
+    """End of the bar's local hour in UTC. A bar is fully elapsed when this
+    is <= now_utc."""
+    local_start = datetime(
+        bar.local_date.year,
+        bar.local_date.month,
+        bar.local_date.day,
+        bar.local_hour,
+        tzinfo=_FUSE_TZ,
+    )
+    return (local_start + timedelta(hours=1)).astimezone(UTC)
 
 
 async def _async_last_imported_date(
