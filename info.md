@@ -1,8 +1,8 @@
 # Fuse Energy
 
-A Home Assistant custom integration for [Fuse Energy](https://www.fuseenergy.com/) (UK). Pulls your half-hourly electricity usage and cost into Home Assistant so it can be used in the Energy dashboard.
+A Home Assistant custom integration for Fuse Energy (UK). Pulls your half-hourly electricity usage and cost into Home Assistant so it can be used in the Energy dashboard.
 
-> ⚠️ **Unofficial and unsupported.** This is a community project. It is not produced, sponsored, endorsed by, or affiliated with Fuse Energy in any way. It talks to Fuse's customer API the same way the official Fuse app does — that API is undocumented and may change or break at any time without notice. **Use at your own risk.** No warranty, no support guarantee; if it stops working, breaks your Home Assistant setup, or returns incorrect data, that's on you to deal with.
+> ⚠️ **Unofficial and unsupported.** This is a community project. It is not produced, sponsored, endorsed by, or affiliated with Fuse Energy in any way. **Use at your own risk.** No warranty, no support guarantee; if it stops working, breaks your Home Assistant setup, or returns incorrect data, that's on you to deal with.
 
 ## Quickstart
 
@@ -17,6 +17,6 @@ It can take up to an hour after setup for the first usage/cost data to land, sin
 
 ## Trademarks and disclaimer
 
-"Fuse" and "Fuse Energy" are trademarks of their respective owner (Fuse Energy Ltd). They are referenced here solely to describe what this integration connects to. This project is an independent, unofficial work by a Fuse customer and is **not affiliated with, authorized, maintained, sponsored, or endorsed by Fuse Energy or any of its affiliates or subsidiaries**. All product and company names are the property of their respective owners.
+"Fuse" and "Fuse Energy" are trademarks of their respective owner (Fuse Energy Ltd). They are referenced here solely to describe what this integration connects to. This project is an independent, unofficial work and is **not affiliated with, authorized, maintained, sponsored, or endorsed by Fuse Energy or any of its affiliates or subsidiaries**. All product and company names are the property of their respective owners.
 
 This software is provided "as is", without warranty of any kind.

@@ -1,6 +1,6 @@
 # fuse-homeassistant
 
-A Home Assistant custom integration for [Fuse Energy](https://www.fuseenergy.com/) (UK). Pulls your half-hourly electricity usage and cost into Home Assistant so it can be used in the Energy dashboard.
+A Home Assistant custom integration for Fuse Energy (UK). Pulls your half-hourly electricity usage and cost into Home Assistant so it can be used in the Energy dashboard.
 
 > ⚠️ **Unofficial and unsupported.** This is a community project. It is not produced, sponsored, endorsed by, or affiliated with Fuse Energy in any way. **Use at your own risk.** No warranty, no support guarantee; if it stops working, breaks your Home Assistant setup, or returns incorrect data, that's on you to deal with.
 
