@@ -9,7 +9,7 @@ A Home Assistant custom integration for [Fuse Energy](https://www.fuseenergy.com
 Prerequisites: a working Home Assistant install, [HACS](https://hacs.xyz/) installed, and a Fuse Energy account.
 
 1. In Home Assistant, open **HACS → ⋮ (top right) → Custom repositories**.
-2. Add `https://github.com/simon-solts/fuse-homeassistant` as a **Integration** repository.
+2. Add `https://github.com/simonsolts/fuse-homeassistant` as a **Integration** repository.
 3. Find **Fuse Energy** in the HACS integration list and click **Download**.
 4. **Restart Home Assistant.**
 5. Go to **Settings → Devices & Services → Add Integration**, search for **Fuse Energy**, and follow the prompts to sign in with your Fuse account.

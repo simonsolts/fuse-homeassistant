@@ -1,12 +1,22 @@
 # Fuse Energy
 
-Custom Home Assistant integration for Fuse Energy (UK).
+A Home Assistant custom integration for [Fuse Energy](https://www.fuseenergy.com/) (UK). Pulls your half-hourly electricity usage and cost into Home Assistant so it can be used in the Energy dashboard.
 
-**Status:** scaffold only. The API client is a stub that raises a clear error on first refresh. Once the Fuse API is reverse-engineered, the client will be filled in and the integration will report real energy and cost data.
+> ⚠️ **Unofficial and unsupported.** This is a community project. It is not produced, sponsored, endorsed by, or affiliated with Fuse Energy in any way. It talks to Fuse's customer API the same way the official Fuse app does — that API is undocumented and may change or break at any time without notice. **Use at your own risk.** No warranty, no support guarantee; if it stops working, breaks your Home Assistant setup, or returns incorrect data, that's on you to deal with.
 
-## What you get today
-- A UI config flow that accepts an access token.
-- Two sensors (energy in kWh, cost in £) wired to the Energy dashboard. Both will appear unavailable until the API is implemented.
+## Quickstart
 
-## Install
-Add this repository as a HACS custom repository, then add the "Fuse Energy" integration via *Settings → Devices & Services*.
+Prerequisites: a working Home Assistant install, HACS installed, and a Fuse Energy account.
+
+1. Install **Fuse Energy** via HACS (click **Download** on this page).
+2. **Restart Home Assistant.**
+3. Go to **Settings → Devices & Services → Add Integration**, search for **Fuse Energy**, and follow the prompts to sign in with your Fuse account.
+4. Once configured, add the energy and cost sensors to your **Energy dashboard** (Settings → Dashboards → Energy).
+
+It can take up to an hour after setup for the first usage/cost data to land, since Fuse publishes consumption with a delay.
+
+## Trademarks and disclaimer
+
+"Fuse" and "Fuse Energy" are trademarks of their respective owner (Fuse Energy Ltd). They are referenced here solely to describe what this integration connects to. This project is an independent, unofficial work by a Fuse customer and is **not affiliated with, authorized, maintained, sponsored, or endorsed by Fuse Energy or any of its affiliates or subsidiaries**. All product and company names are the property of their respective owners.
+
+This software is provided "as is", without warranty of any kind.
