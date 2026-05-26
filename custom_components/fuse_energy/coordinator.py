@@ -71,8 +71,14 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
         if last_imported is None:
             start = today - timedelta(days=_INITIAL_BACKFILL_DAYS)
         else:
-            # Refetch the last imported day so any newly-realised hours arrive.
-            start = last_imported
+            # Always refetch at least the last 2 days so the writer's
+            # rewrite window can re-check recent partial-realised hours
+            # that Fuse may still be settling.
+            start = min(last_imported, today - timedelta(days=2))
+        _LOGGER.warning(
+            "[fuse-diag] tick start: now=%s today=%s last_imported=%s start=%s",
+            now_utc.isoformat(), today, last_imported, start,
+        )
 
         # Collect all bars across the range and import in a single call so the
         # writer's running_sum stays continuous. Importing per-day races with
@@ -88,11 +94,25 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
             day += timedelta(days=1)
 
         # Fuse's mobile API marks the current (in-progress) hour as REALISED
-        # with a growing partial value. If we pass that to the writer the row
-        # gets locked at the partial value forever (subsequent ticks skip it
-        # via start_ts <= last_start_ts). Only consider bars whose local hour
-        # has fully elapsed.
+        # with a growing partial value. Excluding in-progress bars from the
+        # writer keeps the rewrite window honest: partial values may still
+        # land for the most-recently-ended hour, but the writer's upsert
+        # logic refreshes them as Fuse settles.
         complete_bars = [b for b in all_bars if _bar_end_utc(b) <= now_utc]
+
+        realised_count = sum(1 for b in complete_bars if b.is_realised)
+        _LOGGER.warning(
+            "[fuse-diag] collected %d total / %d complete / %d realised. "
+            "Last 3 complete+realised=%s",
+            len(all_bars), len(complete_bars), realised_count,
+            [
+                f"{b.local_date} h{b.local_hour:02d} kwh={b.kwh} cost={b.cost_gbp}"
+                for b in sorted(
+                    (b for b in complete_bars if b.is_realised),
+                    key=lambda b: (b.local_date, b.local_hour),
+                )[-3:]
+            ],
+        )
 
         if complete_bars:
             await async_import_hourly_bars(
@@ -108,7 +128,13 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
             ):
                 latest_realised = bar
         if latest_realised is None:
+            _LOGGER.warning("[fuse-diag] no realised bars; keeping previous snapshot")
             return self.data
+        _LOGGER.warning(
+            "[fuse-diag] latest_realised=%s h%02d kwh=%s cost=%s",
+            latest_realised.local_date, latest_realised.local_hour,
+            latest_realised.kwh, latest_realised.cost_gbp,
+        )
         return FuseEnergySnapshot(
             last_hour_kwh=float(latest_realised.kwh),
             last_hour_cost_gbp=float(latest_realised.cost_gbp),

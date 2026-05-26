@@ -6,11 +6,18 @@ don't collide with any sensor entity's auto-generated stats.
 
 UTC alignment: Fuse's index hours are Europe/London local. HA's
 statistics rows must ``start`` at a UTC hour boundary. We convert per bar.
+
+Recent-window upsert: Fuse's mobile API marks an hour as REALISED the
+moment it ends, but the value continues to settle for some hours as the
+meter pushes its readings. To handle this, we rewrite the last
+``_REWRITE_HOURS`` of stats on every tick (UPSERT semantics) while
+preserving older settled history unchanged.
 """
 from __future__ import annotations
 
+import logging
 from collections.abc import Callable, Iterable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
@@ -22,6 +29,7 @@ from homeassistant.components.recorder.models import (
 from homeassistant.components.recorder.statistics import (
     async_add_external_statistics,
     get_last_statistics,
+    statistics_during_period,
 )
 from homeassistant.const import UnitOfEnergy
 from homeassistant.core import HomeAssistant
@@ -29,7 +37,13 @@ from homeassistant.core import HomeAssistant
 from .api import HourlyBar
 from .const import DOMAIN, stat_id_consumption, stat_id_cost
 
+_LOGGER = logging.getLogger(__name__)
 _FUSE_TZ = ZoneInfo("Europe/London")
+
+# Bars whose start is within this window of "now" are always re-checked
+# (upserted) on every tick, so settled values overwrite earlier partial
+# values that Fuse may have returned right after the hour closed.
+_REWRITE_HOURS = 24
 
 
 async def async_import_hourly_bars(
@@ -42,7 +56,12 @@ async def async_import_hourly_bars(
     Forecast bars are skipped; they'll be picked up once Fuse re-classifies
     them as REALISED on a subsequent poll.
     """
-    realised = [b for b in bars if b.is_realised]
+    bars_list = list(bars)
+    realised = [b for b in bars_list if b.is_realised]
+    _LOGGER.warning(
+        "[fuse-diag] import: %d total bars, %d realised, %d forecast",
+        len(bars_list), len(realised), len(bars_list) - len(realised),
+    )
     if not realised:
         return
 
@@ -76,30 +95,84 @@ async def _import_series(
     bars: list[HourlyBar],
     value_getter: Callable[[HourlyBar], Decimal],
 ) -> None:
-    last = await get_instance(hass).async_add_executor_job(
+    now_utc = datetime.now(UTC)
+    cutoff_dt = now_utc - timedelta(hours=_REWRITE_HOURS)
+    cutoff_ts = cutoff_dt.timestamp()
+
+    sorted_bars = sorted(bars, key=lambda b: (b.local_date, b.local_hour))
+
+    last_query = await get_instance(hass).async_add_executor_job(
         get_last_statistics, hass, 1, statistic_id, True, {"sum"}
     )
-    last_rows = last.get(statistic_id) or []
+    last_rows = last_query.get(statistic_id) or []
     if last_rows:
-        last_start_ts = float(last_rows[0]["start"])
-        running_sum = float(last_rows[0]["sum"] or 0.0)
+        last_start_ts_in_db = float(last_rows[0]["start"])
+        last_sum_in_db = float(last_rows[0]["sum"] or 0.0)
     else:
-        last_start_ts = float("-inf")
-        running_sum = 0.0
+        last_start_ts_in_db = float("-inf")
+        last_sum_in_db = 0.0
 
     rows: list[StatisticData] = []
-    for bar in sorted(bars, key=lambda b: (b.local_date, b.local_hour)):
-        start = _bar_start_utc(bar)
-        if start.timestamp() <= last_start_ts:
+
+    # Phase 1: bars with start < cutoff (older than rewrite window) —
+    # append if not already in DB, skip if already present. This handles
+    # initial backfill and recovery after extended downtime; values older
+    # than the rewrite window are trusted as settled.
+    p1_appended = 0
+    p1_skipped = 0
+    running_sum = last_sum_in_db
+    for bar in sorted_bars:
+        start_dt = _bar_start_utc(bar)
+        start_ts = start_dt.timestamp()
+        if start_ts >= cutoff_ts:
+            break  # entered Phase 2 zone
+        if start_ts <= last_start_ts_in_db:
+            p1_skipped += 1
             continue
         value = float(value_getter(bar))
         running_sum += value
-        rows.append(
-            StatisticData(start=start, state=value, sum=running_sum)
-        )
+        rows.append(StatisticData(start=start_dt, state=value, sum=running_sum))
+        p1_appended += 1
+
+    # Phase 2: bars with start >= cutoff (within rewrite window) — always
+    # upsert. Running_sum is reset to the cumulative sum at the latest row
+    # strictly before the cutoff, so values for hours within the window are
+    # rebuilt from scratch on every tick.
+    p2_base = await _get_running_sum_before(hass, statistic_id, cutoff_dt)
+    p2_count = 0
+    running_sum = p2_base
+    for bar in sorted_bars:
+        start_dt = _bar_start_utc(bar)
+        start_ts = start_dt.timestamp()
+        if start_ts < cutoff_ts:
+            continue
+        value = float(value_getter(bar))
+        running_sum += value
+        rows.append(StatisticData(start=start_dt, state=value, sum=running_sum))
+        p2_count += 1
+
+    _LOGGER.warning(
+        "[fuse-diag] series %s: cutoff=%s db_last=(start=%s sum=%s); "
+        "phase1 appended=%d skipped=%d; phase2 base_sum=%s upserted=%d",
+        statistic_id,
+        cutoff_dt.isoformat(),
+        datetime.fromtimestamp(last_start_ts_in_db, UTC).isoformat()
+        if last_rows else "(none)",
+        last_sum_in_db if last_rows else None,
+        p1_appended, p1_skipped,
+        p2_base, p2_count,
+    )
 
     if not rows:
         return
+
+    _LOGGER.warning(
+        "[fuse-diag] series %s: writing %d rows; first=%s (state=%s sum=%s) "
+        "last=%s (state=%s sum=%s)",
+        statistic_id, len(rows),
+        rows[0]["start"].isoformat(), rows[0]["state"], rows[0]["sum"],
+        rows[-1]["start"].isoformat(), rows[-1]["state"], rows[-1]["sum"],
+    )
 
     metadata: StatisticMetaData = {
         "has_mean": False,
@@ -110,6 +183,35 @@ async def _import_series(
         "unit_of_measurement": unit,
     }
     async_add_external_statistics(hass, metadata, rows)
+
+
+async def _get_running_sum_before(
+    hass: HomeAssistant, statistic_id: str, before_dt: datetime,
+) -> float:
+    """Return the cumulative sum at the latest stats row whose start is
+    strictly before ``before_dt``. Returns 0.0 if no such row exists."""
+    last_query = await get_instance(hass).async_add_executor_job(
+        get_last_statistics, hass, 1, statistic_id, True, {"sum"}
+    )
+    last_rows = last_query.get(statistic_id) or []
+    if not last_rows:
+        return 0.0
+    last_start_ts = float(last_rows[0]["start"])
+    if last_start_ts < before_dt.timestamp():
+        return float(last_rows[0]["sum"] or 0.0)
+
+    # Latest row is in or after the rewrite window — query for the row
+    # immediately before the cutoff using a 7-day lookback (plenty given
+    # we re-fetch the last 2 days every tick).
+    start_dt = before_dt - timedelta(days=7)
+    rows_dict = await get_instance(hass).async_add_executor_job(
+        statistics_during_period,
+        hass, start_dt, before_dt, {statistic_id}, "hour", None, {"sum"},
+    )
+    rows = rows_dict.get(statistic_id, [])
+    if not rows:
+        return 0.0
+    return float(rows[-1].get("sum") or 0.0)
 
 
 def _bar_start_utc(bar: HourlyBar) -> datetime:

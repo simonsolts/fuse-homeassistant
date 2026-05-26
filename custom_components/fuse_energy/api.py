@@ -215,7 +215,36 @@ class FuseEnergyApiClient:
         )
         if not isinstance(data, dict):
             raise FuseEnergyApiError(f"unexpected chart shape: {type(data)}")
-        return _parse_bars(data, local_date)
+        # DIAGNOSTIC: dump current_index + last 3 raw ELEC_IMPORT bars from
+        # the payload so we can see what Fuse classifies as REALISED and
+        # the value it currently reports for recently-closed hours.
+        current_index = data.get("current_index")
+        raw_elec_bars: list[dict] = []
+        for supply in data.get("supplies") or ():
+            if supply.get("supply_type") == "ELEC_IMPORT":
+                raw_elec_bars = [e.get("bar") or {} for e in (supply.get("bars") or ())]
+                break
+        _LOGGER.warning(
+            "[fuse-diag] fetch_day %s: current_index=%s; raw last 3 elec bars=%s",
+            local_date, current_index, raw_elec_bars[-3:],
+        )
+        bars = _parse_bars(data, local_date)
+        if bars:
+            recent = sorted(bars, key=lambda b: b.local_hour)[-3:]
+            _LOGGER.warning(
+                "[fuse-diag] fetch_day %s parsed %d bars; last 3=%s",
+                local_date, len(bars),
+                [
+                    f"h{b.local_hour:02d} kwh={b.kwh} cost={b.cost_gbp} realised={b.is_realised}"
+                    for b in recent
+                ],
+            )
+        else:
+            _LOGGER.warning(
+                "[fuse-diag] fetch_day %s parsed 0 bars (current_index=%s)",
+                local_date, current_index,
+            )
+        return bars
 
 
 def _parse_bars(payload: dict, local_date: date) -> list[HourlyBar]:
