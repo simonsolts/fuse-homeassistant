@@ -73,10 +73,6 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
         else:
             # Refetch the last imported day so any newly-realised hours arrive.
             start = last_imported
-        _LOGGER.warning(
-            "[fuse-diag] tick start: today=%s last_imported=%s start=%s",
-            today, last_imported, start,
-        )
 
         # Collect all bars across the range and import in a single call so the
         # writer's running_sum stays continuous. Importing per-day races with
@@ -98,22 +94,6 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
         # has fully elapsed.
         complete_bars = [b for b in all_bars if _bar_end_utc(b) <= now_utc]
 
-        realised_count = sum(1 for b in complete_bars if b.is_realised)
-        _LOGGER.warning(
-            "[fuse-diag] collected %d bars total, %d complete, %d realised+complete. "
-            "Last 3 realised+complete=%s",
-            len(all_bars),
-            len(complete_bars),
-            realised_count,
-            [
-                f"{b.local_date} h{b.local_hour:02d} kwh={b.kwh}"
-                for b in sorted(
-                    (b for b in complete_bars if b.is_realised),
-                    key=lambda b: (b.local_date, b.local_hour),
-                )[-3:]
-            ],
-        )
-
         if complete_bars:
             await async_import_hourly_bars(
                 self.hass, self._premises_fid, complete_bars
@@ -128,15 +108,7 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
             ):
                 latest_realised = bar
         if latest_realised is None:
-            _LOGGER.warning("[fuse-diag] no realised bars; keeping previous snapshot")
             return self.data
-        _LOGGER.warning(
-            "[fuse-diag] latest_realised=%s h%02d kwh=%s cost=%s",
-            latest_realised.local_date,
-            latest_realised.local_hour,
-            latest_realised.kwh,
-            latest_realised.cost_gbp,
-        )
         return FuseEnergySnapshot(
             last_hour_kwh=float(latest_realised.kwh),
             last_hour_cost_gbp=float(latest_realised.cost_gbp),

@@ -9,7 +9,6 @@ statistics rows must ``start`` at a UTC hour boundary. We convert per bar.
 """
 from __future__ import annotations
 
-import logging
 from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from decimal import Decimal
@@ -30,7 +29,6 @@ from homeassistant.core import HomeAssistant
 from .api import HourlyBar
 from .const import DOMAIN, stat_id_consumption, stat_id_cost
 
-_LOGGER = logging.getLogger(__name__)
 _FUSE_TZ = ZoneInfo("Europe/London")
 
 
@@ -44,14 +42,7 @@ async def async_import_hourly_bars(
     Forecast bars are skipped; they'll be picked up once Fuse re-classifies
     them as REALISED on a subsequent poll.
     """
-    bars_list = list(bars)
-    realised = [b for b in bars_list if b.is_realised]
-    _LOGGER.warning(
-        "[fuse-diag] import: %d total bars, %d realised, %d forecast",
-        len(bars_list),
-        len(realised),
-        len(bars_list) - len(realised),
-    )
+    realised = [b for b in bars if b.is_realised]
     if not realised:
         return
 
@@ -92,18 +83,14 @@ async def _import_series(
     if last_rows:
         last_start_ts = float(last_rows[0]["start"])
         running_sum = float(last_rows[0]["sum"] or 0.0)
-        last_start_iso = datetime.fromtimestamp(last_start_ts, UTC).isoformat()
     else:
         last_start_ts = float("-inf")
         running_sum = 0.0
-        last_start_iso = "(none)"
 
     rows: list[StatisticData] = []
-    skipped = 0
     for bar in sorted(bars, key=lambda b: (b.local_date, b.local_hour)):
         start = _bar_start_utc(bar)
         if start.timestamp() <= last_start_ts:
-            skipped += 1
             continue
         value = float(value_getter(bar))
         running_sum += value
@@ -111,30 +98,8 @@ async def _import_series(
             StatisticData(start=start, state=value, sum=running_sum)
         )
 
-    _LOGGER.warning(
-        "[fuse-diag] series %s: last_start=%s running_sum_in=%s; "
-        "considered=%d skipped=%d to_add=%d",
-        statistic_id,
-        last_start_iso,
-        last_rows[0]["sum"] if last_rows else None,
-        len(bars),
-        skipped,
-        len(rows),
-    )
-
     if not rows:
         return
-
-    _LOGGER.warning(
-        "[fuse-diag] series %s: adding %s (state=%s sum=%s) ... %s (state=%s sum=%s)",
-        statistic_id,
-        rows[0]["start"].isoformat(),
-        rows[0]["state"],
-        rows[0]["sum"],
-        rows[-1]["start"].isoformat(),
-        rows[-1]["state"],
-        rows[-1]["sum"],
-    )
 
     metadata: StatisticMetaData = {
         "has_mean": False,
