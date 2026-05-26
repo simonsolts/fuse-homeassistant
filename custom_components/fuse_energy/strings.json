@@ -28,7 +28,9 @@
       "too_many_attempts": "Too many attempts. Please request a new code.",
       "additional_info_mismatch": "Information didn't match Fuse's records",
       "cannot_connect": "Failed to connect to Fuse",
-      "unsupported_challenge": "Fuse requested an unsupported verification step"
+      "unsupported_challenge": "Fuse requested an unsupported verification step",
+      "bad_response": "Fuse returned an unexpected response. Please try again.",
+      "dispatch_failed": "Couldn't send the verification SMS. Please try again."
     },
     "abort": {
       "single_instance_allowed": "Only one Fuse Energy account can be configured.",
