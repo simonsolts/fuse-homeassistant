@@ -6,7 +6,7 @@
   ],
   "config_flow": true,
   "dependencies": [],
-  "documentation": "https://github.com/simonsolts/fuse-homeassistantd",
+  "documentation": "https://github.com/simonsolts/fuse-homeassistant",
   "issue_tracker": "https://github.com/simonsolts/fuse-homeassistant/issues",
   "iot_class": "cloud_polling",
   "requirements": [],
