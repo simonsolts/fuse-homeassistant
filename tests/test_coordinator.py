@@ -1,4 +1,5 @@
 """Tests for FuseEnergyDataUpdateCoordinator (backfill orchestration)."""
+
 from __future__ import annotations
 
 from datetime import date, datetime, timedelta
@@ -6,10 +7,10 @@ from decimal import Decimal
 from unittest.mock import AsyncMock, MagicMock
 from zoneinfo import ZoneInfo
 
-import pytest
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers.update_coordinator import UpdateFailed
+import pytest
 
 from custom_components.fuse_energy.api import (
     FuseEnergyApiAuthError,
@@ -21,24 +22,29 @@ from custom_components.fuse_energy.coordinator import (
     FuseEnergyDataUpdateCoordinator,
 )
 
-
 LDN = ZoneInfo("Europe/London")
 
 
 def _bar(d: date, h: int, kwh="1.0", cost="0.1", realised=True) -> HourlyBar:
     return HourlyBar(
-        local_date=d, local_hour=h,
-        kwh=Decimal(kwh), cost_gbp=Decimal(cost),
+        local_date=d,
+        local_hour=h,
+        kwh=Decimal(kwh),
+        cost_gbp=Decimal(cost),
         is_realised=realised,
     )
 
 
-def _make_coord(hass: HomeAssistant, client: FuseEnergyApiClient) -> FuseEnergyDataUpdateCoordinator:
+def _make_coord(
+    hass: HomeAssistant, client: FuseEnergyApiClient
+) -> FuseEnergyDataUpdateCoordinator:
     return FuseEnergyDataUpdateCoordinator(hass, client, premises_fid="pfid")
 
 
 async def test_fetches_today_only_when_no_prior_statistics(
-    recorder_mock, hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch,
+    recorder_mock,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     today_ldn = datetime.now(LDN).date()
     client = MagicMock(spec=FuseEnergyApiClient)
@@ -59,7 +65,9 @@ async def test_fetches_today_only_when_no_prior_statistics(
 
 
 async def test_resumes_from_last_statistic_date(
-    recorder_mock, hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch,
+    recorder_mock,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     today_ldn = datetime.now(LDN).date()
     last_imported = today_ldn - timedelta(days=2)
@@ -81,14 +89,18 @@ async def test_resumes_from_last_statistic_date(
 
 
 async def test_auth_error_translates_to_config_entry_auth_failed(
-    recorder_mock, hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch,
+    recorder_mock,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         "custom_components.fuse_energy.coordinator._async_last_imported_date",
         AsyncMock(return_value=None),
     )
     client = MagicMock(spec=FuseEnergyApiClient)
-    client.async_fetch_day = AsyncMock(side_effect=FuseEnergyApiAuthError("bad cookies"))
+    client.async_fetch_day = AsyncMock(
+        side_effect=FuseEnergyApiAuthError("bad cookies")
+    )
 
     coord = _make_coord(hass, client)
     with pytest.raises(ConfigEntryAuthFailed):
@@ -96,7 +108,9 @@ async def test_auth_error_translates_to_config_entry_auth_failed(
 
 
 async def test_api_error_translates_to_update_failed(
-    recorder_mock, hass: HomeAssistant, monkeypatch: pytest.MonkeyPatch,
+    recorder_mock,
+    hass: HomeAssistant,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setattr(
         "custom_components.fuse_energy.coordinator._async_last_imported_date",
@@ -126,11 +140,13 @@ async def test_snapshot_holds_latest_realised_bar(
         AsyncMock(return_value=today),
     )
     client = MagicMock(spec=FuseEnergyApiClient)
-    client.async_fetch_day = AsyncMock(return_value=[
-        _bar(today, 10, kwh="0.5", cost="0.1", realised=True),
-        _bar(today, 11, kwh="0.7", cost="0.2", realised=True),
-        _bar(today, 12, kwh="0.0", cost="0.0", realised=False),  # forecast
-    ])
+    client.async_fetch_day = AsyncMock(
+        return_value=[
+            _bar(today, 10, kwh="0.5", cost="0.1", realised=True),
+            _bar(today, 11, kwh="0.7", cost="0.2", realised=True),
+            _bar(today, 12, kwh="0.0", cost="0.0", realised=False),  # forecast
+        ]
+    )
 
     coord = _make_coord(hass, client)
     snap = await coord._async_update_data()
@@ -154,9 +170,7 @@ async def test_in_progress_hour_excluded_from_writer_and_snapshot(
     freezer.move_to("2026-05-26T10:30:00+00:00")
     today = date(2026, 5, 26)
 
-    bars = [
-        _bar(today, h, kwh="1.0", cost="0.1", realised=True) for h in range(11)
-    ]
+    bars = [_bar(today, h, kwh="1.0", cost="0.1", realised=True) for h in range(11)]
     # h11 is the in-progress hour with a partial value Fuse marked REALISED.
     bars.append(_bar(today, 11, kwh="0.128", cost="0.03", realised=True))
 

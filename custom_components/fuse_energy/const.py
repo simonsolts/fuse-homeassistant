@@ -1,4 +1,5 @@
 """Constants for the Fuse Energy integration."""
+
 from __future__ import annotations
 
 from datetime import timedelta
@@ -20,6 +21,7 @@ FUSE_WEB_BASE_URL: str = "https://www.fuseenergy.com"
 # Sent as x-fuse-app-version on the web SMS-dispatch call.
 # Bump if that endpoint starts rejecting this value.
 FUSE_WEB_APP_VERSION: str = "5.314"
+
 
 # --- Statistics IDs ---
 def _stat_object_id_suffix(premises_fid: str) -> str:

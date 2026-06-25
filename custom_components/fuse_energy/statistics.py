@@ -13,6 +13,7 @@ meter pushes its readings. To handle this, we rewrite the last
 ``_REWRITE_HOURS`` of stats on every tick (UPSERT semantics) while
 preserving older settled history unchanged.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable, Iterable
@@ -154,7 +155,9 @@ async def _import_series(
 
 
 async def _get_running_sum_before(
-    hass: HomeAssistant, statistic_id: str, before_dt: datetime,
+    hass: HomeAssistant,
+    statistic_id: str,
+    before_dt: datetime,
 ) -> float:
     """Return the cumulative sum at the latest stats row whose start is
     strictly before ``before_dt``. Returns 0.0 if no such row exists."""
@@ -174,7 +177,13 @@ async def _get_running_sum_before(
     start_dt = before_dt - timedelta(days=7)
     rows_dict = await get_instance(hass).async_add_executor_job(
         statistics_during_period,
-        hass, start_dt, before_dt, {statistic_id}, "hour", None, {"sum"},
+        hass,
+        start_dt,
+        before_dt,
+        {statistic_id},
+        "hour",
+        None,
+        {"sum"},
     )
     rows = rows_dict.get(statistic_id, [])
     if not rows:
@@ -191,5 +200,3 @@ def _bar_start_utc(bar: HourlyBar) -> datetime:
         tzinfo=_FUSE_TZ,
     )
     return local.astimezone(UTC)
-
-

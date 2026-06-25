@@ -1,9 +1,10 @@
 """DataUpdateCoordinator that drives Fuse Energy backfill on every tick."""
+
 from __future__ import annotations
 
-import logging
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, timedelta
+import logging
 from zoneinfo import ZoneInfo
 
 from homeassistant.components.recorder import get_instance
@@ -84,9 +85,7 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
         all_bars: list[HourlyBar] = []
         day = start
         while day <= today:
-            all_bars.extend(
-                await self._client.async_fetch_day(self._premises_fid, day)
-            )
+            all_bars.extend(await self._client.async_fetch_day(self._premises_fid, day))
             day += timedelta(days=1)
 
         # Fuse's mobile API marks the current (in-progress) hour as REALISED
@@ -97,9 +96,7 @@ class FuseEnergyDataUpdateCoordinator(DataUpdateCoordinator[FuseEnergySnapshot |
         complete_bars = [b for b in all_bars if _bar_end_utc(b) <= now_utc]
 
         if complete_bars:
-            await async_import_hourly_bars(
-                self.hass, self._premises_fid, complete_bars
-            )
+            await async_import_hourly_bars(self.hass, self._premises_fid, complete_bars)
 
         latest_realised: HourlyBar | None = None
         for bar in complete_bars:

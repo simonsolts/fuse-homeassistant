@@ -3,14 +3,15 @@
 Targets api.fuseenergy.com with Authorization: Bearer <access_token> +
 Device-Id headers. Wraps every call with transparent refresh-on-401.
 """
+
 from __future__ import annotations
 
 import asyncio
-import logging
+from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
-from typing import Awaitable, Callable
+import logging
 
 import aiohttp
 
@@ -37,12 +38,14 @@ class FuseEnergyApiAuthError(FuseEnergyApiError):
 @dataclass(frozen=True, slots=True)
 class Premises:
     """A premises returned by /api/v2/customer/premises."""
+
     fid: str
 
 
 @dataclass(frozen=True, slots=True)
 class HourlyBar:
     """One hour of consumption + cost. Same shape as the previous client."""
+
     local_date: date
     local_hour: int
     kwh: Decimal
@@ -86,20 +89,19 @@ class FuseEnergyApiClient:
             }
             try:
                 async with self._session.request(
-                    method, f"{FUSE_API_BASE_URL}{path}",
-                    headers=headers, timeout=_TIMEOUT, **kw,
+                    method,
+                    f"{FUSE_API_BASE_URL}{path}",
+                    headers=headers,
+                    timeout=_TIMEOUT,
+                    **kw,
                 ) as r:
                     if r.status == 401:
                         if attempt == 1:
-                            raise FuseEnergyApiAuthError(
-                                "401 even after refresh"
-                            )
+                            raise FuseEnergyApiAuthError("401 even after refresh")
                         await self._refresh_tokens(stale_token)
                         continue
-                    if 500 <= r.status:
-                        raise FuseEnergyApiError(
-                            f"HTTP {r.status} from {path}"
-                        )
+                    if r.status >= 500:
+                        raise FuseEnergyApiError(f"HTTP {r.status} from {path}")
                     if not (200 <= r.status < 300):
                         body = await r.text()
                         raise FuseEnergyApiError(
@@ -122,7 +124,9 @@ class FuseEnergyApiClient:
         try:
             async with self._session.get(
                 f"{FUSE_API_BASE_URL}{path}",
-                headers=headers, timeout=_TIMEOUT, **kw,
+                headers=headers,
+                timeout=_TIMEOUT,
+                **kw,
             ) as r:
                 if r.status == 401:
                     # Yield once so sibling tasks can reach the same 401 branch
@@ -135,16 +139,16 @@ class FuseEnergyApiClient:
                     }
                     async with self._session.get(
                         f"{FUSE_API_BASE_URL}{path}",
-                        headers=headers, timeout=_TIMEOUT, **kw,
+                        headers=headers,
+                        timeout=_TIMEOUT,
+                        **kw,
                     ) as r2:
                         if r2.status == 401:
                             raise FuseEnergyApiAuthError("401 even after refresh")
                         if not (200 <= r2.status < 300):
-                            raise FuseEnergyApiError(
-                                f"HTTP {r2.status} from {path}"
-                            )
+                            raise FuseEnergyApiError(f"HTTP {r2.status} from {path}")
                         return await r2.json()
-                if 500 <= r.status:
+                if r.status >= 500:
                     raise FuseEnergyApiError(f"HTTP {r.status} from {path}")
                 if not (200 <= r.status < 300):
                     raise FuseEnergyApiError(f"HTTP {r.status} from {path}")
@@ -197,7 +201,9 @@ class FuseEnergyApiClient:
         return out
 
     async def async_fetch_day(
-        self, premises_fid: str, local_date: date,
+        self,
+        premises_fid: str,
+        local_date: date,
     ) -> list[HourlyBar]:
         """GET /api/v1/premises/{premises_fid}/chart?year=Y&month=M&day=D.
 
@@ -229,7 +235,9 @@ def _parse_bars(payload: dict, local_date: date) -> list[HourlyBar]:
             bar = entry.get("bar") or {}
             idx = bar.get("index") or {}
             if (idx.get("year"), idx.get("month"), idx.get("day")) != (
-                local_date.year, local_date.month, local_date.day,
+                local_date.year,
+                local_date.month,
+                local_date.day,
             ):
                 continue
             kwh_raw = bar.get("kWh")

@@ -1,10 +1,11 @@
 """Smoke tests for custom_components.fuse_energy."""
+
 from __future__ import annotations
 
-import importlib.util
-import json
 from datetime import date
 from decimal import Decimal
+import importlib.util
+import json
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -17,7 +18,6 @@ from custom_components.fuse_energy.api import HourlyBar
 from custom_components.fuse_energy.const import (
     CONF_ACCESS_TOKEN,
     CONF_DEVICE_ID,
-    CONF_PHONE_NUMBER,
     CONF_PREMISES_FID,
     CONF_REFRESH_TOKEN,
     DOMAIN,
@@ -46,7 +46,7 @@ def test_manifest_is_valid_json_with_required_keys() -> None:
     assert manifest["config_flow"] is True
     assert manifest["iot_class"] == "cloud_polling"
     assert manifest["version"] == "0.4.6"
-    assert manifest["codeowners"] ==  ["@simonsolts"]
+    assert manifest["codeowners"] == ["@simonsolts"]
 
 
 def test_const_exposes_new_config_keys_and_stat_templates() -> None:
@@ -68,15 +68,24 @@ def test_const_exposes_new_config_keys_and_stat_templates() -> None:
     # UUID-format fids contain hyphens which are invalid in HA statistic_ids;
     # the helpers must sanitize them to underscores.
     fid = "abc12345-1234-1234-1234-abcdef123456"
-    assert const.stat_id_consumption(fid) == "fuse_energy:elec_consumption_abc12345_1234_1234_1234_abcdef123456"
-    assert const.stat_id_cost(fid) == "fuse_energy:elec_cost_abc12345_1234_1234_1234_abcdef123456"
+    assert (
+        const.stat_id_consumption(fid)
+        == "fuse_energy:elec_consumption_abc12345_1234_1234_1234_abcdef123456"
+    )
+    assert (
+        const.stat_id_cost(fid)
+        == "fuse_energy:elec_cost_abc12345_1234_1234_1234_abcdef123456"
+    )
 
 
 async def test_setup_and_unload_entry(
     recorder_mock, hass: HomeAssistant, auto_enable_custom_integrations
 ) -> None:
     entry = MockConfigEntry(
-        domain=DOMAIN, data=_DATA, unique_id="fuse_energy_singleton", version=2,
+        domain=DOMAIN,
+        data=_DATA,
+        unique_id="fuse_energy_singleton",
+        version=2,
     )
     entry.add_to_hass(hass)
 
@@ -113,7 +122,8 @@ async def test_setup_and_unload_entry(
 
 
 async def test_persist_tokens_callback_updates_entry_data(
-    hass: HomeAssistant, auto_enable_custom_integrations,
+    hass: HomeAssistant,
+    auto_enable_custom_integrations,
 ) -> None:
     """Setting up the entry should wire a callback that writes new tokens
     into entry.data, leaving other keys untouched."""
@@ -132,9 +142,7 @@ async def test_persist_tokens_callback_updates_entry_data(
             "custom_components.fuse_energy.coordinator."
             "FuseEnergyDataUpdateCoordinator.async_config_entry_first_refresh"
         ),
-        patch(
-            "custom_components.fuse_energy.FuseEnergyApiClient"
-        ) as ClientCls,
+        patch("custom_components.fuse_energy.FuseEnergyApiClient") as ClientCls,
     ):
         await hass.config_entries.async_setup(entry.entry_id)
         await hass.async_block_till_done()
@@ -148,7 +156,7 @@ async def test_persist_tokens_callback_updates_entry_data(
         assert entry.data[CONF_ACCESS_TOKEN] == "AT_NEW"
         assert entry.data[CONF_REFRESH_TOKEN] == "RT_NEW"
         assert entry.data[CONF_DEVICE_ID] == "dev-uuid"  # untouched
-        assert entry.data[CONF_PREMISES_FID] == "pfid"   # untouched
+        assert entry.data[CONF_PREMISES_FID] == "pfid"  # untouched
 
         await hass.config_entries.async_unload(entry.entry_id)
         await hass.async_block_till_done()
