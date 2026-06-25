@@ -1,0 +1,36 @@
+# https://taskfile.dev
+version: "3"
+
+tasks:
+  default:
+    desc: Run linting and tests
+    cmds:
+      - task: lint
+      - task: test
+
+  install:
+    desc: Sync all dependency groups
+    cmds:
+      - uv sync --all-groups
+
+  test:
+    desc: Run the test suite
+    cmds:
+      - uv run --group test pytest {{.CLI_ARGS}}
+
+  lint:
+    desc: Run ruff lint and format checks (no changes)
+    cmds:
+      - uv run --group lint ruff check .
+      - uv run --group lint ruff format --check .
+
+  lint:fix:
+    desc: Auto-fix lint issues and format the code
+    cmds:
+      - uv run --group lint ruff check --fix .
+      - uv run --group lint ruff format .
+
+  format:
+    desc: Format the code with ruff
+    cmds:
+      - uv run --group lint ruff format .
