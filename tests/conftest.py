@@ -1,6 +1,8 @@
 """Shared test fixtures for the fuse_energy integration."""
+
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -21,7 +23,7 @@ _PROJECT_CUSTOM_COMPONENTS = (
 
 
 @pytest.fixture
-def enable_custom_integrations(enable_custom_integrations):  # noqa: PT004
+def enable_custom_integrations(enable_custom_integrations):
     """Augment the upstream fixture to expose this project's components.
 
     Re-uses the upstream `enable_custom_integrations` fixture (which clears
@@ -39,10 +41,8 @@ def enable_custom_integrations(enable_custom_integrations):  # noqa: PT004
         yield
     finally:
         if added:
-            try:
+            with contextlib.suppress(ValueError):
                 custom_components.__path__.remove(project_path)
-            except ValueError:
-                pass
 
 
 @pytest.fixture

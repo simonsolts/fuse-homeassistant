@@ -1,17 +1,18 @@
 """Tests for the external-statistics writer."""
+
 from __future__ import annotations
 
 from datetime import UTC, date, datetime
 from decimal import Decimal
 from zoneinfo import ZoneInfo
 
-import pytest
 from homeassistant.components.recorder import get_instance
 from homeassistant.components.recorder.statistics import (
     get_last_statistics,
     statistics_during_period,
 )
 from homeassistant.core import HomeAssistant
+import pytest
 from pytest_homeassistant_custom_component.components.recorder.common import (
     async_wait_recording_done,
 )
@@ -19,7 +20,6 @@ from pytest_homeassistant_custom_component.components.recorder.common import (
 from custom_components.fuse_energy.api import HourlyBar
 from custom_components.fuse_energy.const import stat_id_consumption, stat_id_cost
 from custom_components.fuse_energy.statistics import async_import_hourly_bars
-
 
 LDN = ZoneInfo("Europe/London")
 PFID = "abc12345-1234-1234-1234-abcdef123456"
@@ -35,8 +35,12 @@ def _bar(hour: int, kwh: str, cost: str, *, realised: bool = True) -> HourlyBar:
     )
 
 
-def _utc_for(local_year: int, local_month: int, local_day: int, local_hour: int) -> datetime:
-    return datetime(local_year, local_month, local_day, local_hour, tzinfo=LDN).astimezone(UTC)
+def _utc_for(
+    local_year: int, local_month: int, local_day: int, local_hour: int
+) -> datetime:
+    return datetime(
+        local_year, local_month, local_day, local_hour, tzinfo=LDN
+    ).astimezone(UTC)
 
 
 async def test_imports_realised_hours_with_cumulative_sum(
@@ -62,12 +66,28 @@ async def test_imports_realised_hours_with_cumulative_sum(
         {"start", "state", "sum"},
     )
     kwh_rows = rows[kwh_id]
-    assert [r["state"] for r in kwh_rows] == [pytest.approx(0.1), pytest.approx(0.2), pytest.approx(0.3)]
-    assert [r["sum"] for r in kwh_rows] == [pytest.approx(0.1), pytest.approx(0.3), pytest.approx(0.6)]
+    assert [r["state"] for r in kwh_rows] == [
+        pytest.approx(0.1),
+        pytest.approx(0.2),
+        pytest.approx(0.3),
+    ]
+    assert [r["sum"] for r in kwh_rows] == [
+        pytest.approx(0.1),
+        pytest.approx(0.3),
+        pytest.approx(0.6),
+    ]
 
     cost_rows = rows[cost_id]
-    assert [r["state"] for r in cost_rows] == [pytest.approx(0.01), pytest.approx(0.02), pytest.approx(0.03)]
-    assert [r["sum"] for r in cost_rows] == [pytest.approx(0.01), pytest.approx(0.03), pytest.approx(0.06)]
+    assert [r["state"] for r in cost_rows] == [
+        pytest.approx(0.01),
+        pytest.approx(0.02),
+        pytest.approx(0.03),
+    ]
+    assert [r["sum"] for r in cost_rows] == [
+        pytest.approx(0.01),
+        pytest.approx(0.03),
+        pytest.approx(0.06),
+    ]
 
 
 async def test_skips_forecast_bars(recorder_mock, hass: HomeAssistant) -> None:
@@ -154,16 +174,25 @@ async def test_recent_window_upsert_chains_running_sum_with_new_hour(
     await async_wait_recording_done(hass)
 
     # Tick 2: h10 settled to 1.5, h11 new at 1.4
-    await async_import_hourly_bars(hass, PFID, [
-        _bar(10, "1.5", "0.15"),
-        _bar(11, "1.4", "0.14"),
-    ])
+    await async_import_hourly_bars(
+        hass,
+        PFID,
+        [
+            _bar(10, "1.5", "0.15"),
+            _bar(11, "1.4", "0.14"),
+        ],
+    )
     await async_wait_recording_done(hass)
 
     kwh_id = stat_id_consumption(PFID)
     rows_dict = await get_instance(hass).async_add_executor_job(
         statistics_during_period,
-        hass, _utc_for(2026, 5, 21, 0), None, {kwh_id}, "hour", None,
+        hass,
+        _utc_for(2026, 5, 21, 0),
+        None,
+        {kwh_id},
+        "hour",
+        None,
         {"start", "state", "sum"},
     )
     rows = rows_dict[kwh_id]
@@ -184,16 +213,22 @@ async def test_settled_history_outside_rewrite_window_is_preserved(
     freezer.move_to("2026-05-22T14:00:00+00:00")
 
     old_bar = HourlyBar(
-        local_date=date(2026, 5, 19), local_hour=10,
-        kwh=Decimal("1.0"), cost_gbp=Decimal("0.1"), is_realised=True,
+        local_date=date(2026, 5, 19),
+        local_hour=10,
+        kwh=Decimal("1.0"),
+        cost_gbp=Decimal("0.1"),
+        is_realised=True,
     )
     await async_import_hourly_bars(hass, PFID, [old_bar])
     await async_wait_recording_done(hass)
 
     # Try to overwrite with a different value
     new_bar = HourlyBar(
-        local_date=date(2026, 5, 19), local_hour=10,
-        kwh=Decimal("99.0"), cost_gbp=Decimal("9.9"), is_realised=True,
+        local_date=date(2026, 5, 19),
+        local_hour=10,
+        kwh=Decimal("99.0"),
+        cost_gbp=Decimal("9.9"),
+        is_realised=True,
     )
     await async_import_hourly_bars(hass, PFID, [new_bar])
     await async_wait_recording_done(hass)

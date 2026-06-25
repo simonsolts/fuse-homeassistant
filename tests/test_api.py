@@ -1,4 +1,5 @@
 """Tests for the Fuse Energy mobile-API client."""
+
 from __future__ import annotations
 
 from datetime import date
@@ -20,8 +21,11 @@ from custom_components.fuse_energy.auth import TokenPair
 
 def test_hourly_bar_fields() -> None:
     b = HourlyBar(
-        local_date=date(2026, 5, 21), local_hour=20,
-        kwh=Decimal("7.633"), cost_gbp=Decimal("1.76"), is_realised=True,
+        local_date=date(2026, 5, 21),
+        local_hour=20,
+        kwh=Decimal("7.633"),
+        cost_gbp=Decimal("1.76"),
+        is_realised=True,
     )
     assert b.local_hour == 20
 
@@ -36,7 +40,10 @@ def test_exception_hierarchy() -> None:
 
 def test_client_constructor_signature() -> None:
     session = MagicMock(spec=aiohttp.ClientSession)
-    async def _cb(_): pass
+
+    async def _cb(_):
+        pass
+
     c = FuseEnergyApiClient(
         session=session,
         device_id="dev",
@@ -63,20 +70,27 @@ def _client_with_get(resp_or_resps, refreshed=None):
         session.get = MagicMock(side_effect=resp_or_resps)
     else:
         session.get = MagicMock(return_value=resp_or_resps)
+
     async def _cb(new):
         if refreshed is not None:
             refreshed.append(new)
+
     return FuseEnergyApiClient(
-        session=session, device_id="dev",
-        tokens=TokenPair("AT", "RT"), on_tokens_refreshed=_cb,
+        session=session,
+        device_id="dev",
+        tokens=TokenPair("AT", "RT"),
+        on_tokens_refreshed=_cb,
     ), session
 
 
 async def test_list_premises_parses_nested_shape() -> None:
-    resp = _resp(200, [
-        {"premises": {"id": "p1"}, "supplies": [], "default_date_uk": "2026-05-25"},
-        {"premises": {"id": "p2"}, "supplies": []},
-    ])
+    resp = _resp(
+        200,
+        [
+            {"premises": {"id": "p1"}, "supplies": [], "default_date_uk": "2026-05-25"},
+            {"premises": {"id": "p2"}, "supplies": []},
+        ],
+    )
     client, session = _client_with_get(resp)
 
     out = await client.async_list_premises()
@@ -150,8 +164,11 @@ async def test_fetch_day_parses_bars_and_filters_non_target_date() -> None:
 
     assert len(bars) == 3
     assert bars[0] == HourlyBar(
-        local_date=date(2026, 5, 25), local_hour=0,
-        kwh=Decimal("1.297"), cost_gbp=Decimal("0.25"), is_realised=True,
+        local_date=date(2026, 5, 25),
+        local_hour=0,
+        kwh=Decimal("1.297"),
+        cost_gbp=Decimal("0.25"),
+        is_realised=True,
     )
     assert bars[2].is_realised is False  # FORECAST → False
 
@@ -164,10 +181,21 @@ async def test_fetch_day_skips_non_elec_supplies() -> None:
     payload = {
         "current_index": {"year": 2026, "month": 5, "day": 25, "hour": 22},
         "supplies": [
-            {"supply_fid": "g", "supply_type": "GAS_IMPORT",
-             "bars": [{"bar": {"index": {"year": 2026, "month": 5, "day": 25, "hour": 0},
-                                "money": {"amount": "1.00", "currency": "GBP"},
-                                "kWh": "1.0", "type": "REALISED"}, "breakdown": []}]},
+            {
+                "supply_fid": "g",
+                "supply_type": "GAS_IMPORT",
+                "bars": [
+                    {
+                        "bar": {
+                            "index": {"year": 2026, "month": 5, "day": 25, "hour": 0},
+                            "money": {"amount": "1.00", "currency": "GBP"},
+                            "kWh": "1.0",
+                            "type": "REALISED",
+                        },
+                        "breakdown": [],
+                    }
+                ],
+            },
         ],
     }
     resp = _resp(200, payload)
@@ -188,9 +216,12 @@ async def test_401_then_refresh_then_retry_succeeds() -> None:
     second_get = _resp(200, _CHART_PAYLOAD)
     refresh = MagicMock()
     refresh.status = 200
-    refresh.json = AsyncMock(return_value={
-        "access_token": "AT_NEW", "refresh_token": "RT_NEW",
-    })
+    refresh.json = AsyncMock(
+        return_value={
+            "access_token": "AT_NEW",
+            "refresh_token": "RT_NEW",
+        }
+    )
     refresh.__aenter__ = AsyncMock(return_value=refresh)
     refresh.__aexit__ = AsyncMock(return_value=False)
 
@@ -199,9 +230,13 @@ async def test_401_then_refresh_then_retry_succeeds() -> None:
     session.post = MagicMock(return_value=refresh)
 
     persisted: list[TokenPair] = []
-    async def _cb(p): persisted.append(p)
+
+    async def _cb(p):
+        persisted.append(p)
+
     client = FuseEnergyApiClient(
-        session=session, device_id="dev",
+        session=session,
+        device_id="dev",
         tokens=TokenPair("AT_OLD", "RT_OLD"),
         on_tokens_refreshed=_cb,
     )
@@ -229,9 +264,13 @@ async def test_401_then_refresh_401_raises_auth_error() -> None:
     session.post = MagicMock(return_value=refresh)
 
     persisted: list[TokenPair] = []
-    async def _cb(p): persisted.append(p)
+
+    async def _cb(p):
+        persisted.append(p)
+
     client = FuseEnergyApiClient(
-        session=session, device_id="dev",
+        session=session,
+        device_id="dev",
         tokens=TokenPair("AT_OLD", "RT_OLD"),
         on_tokens_refreshed=_cb,
     )
@@ -252,9 +291,12 @@ async def test_concurrent_callers_share_one_refresh() -> None:
     retry_b = _resp(200, _CHART_PAYLOAD)
     refresh = MagicMock()
     refresh.status = 200
-    refresh.json = AsyncMock(return_value={
-        "access_token": "AT_NEW", "refresh_token": "RT_NEW",
-    })
+    refresh.json = AsyncMock(
+        return_value={
+            "access_token": "AT_NEW",
+            "refresh_token": "RT_NEW",
+        }
+    )
     refresh.__aenter__ = AsyncMock(return_value=refresh)
     refresh.__aexit__ = AsyncMock(return_value=False)
 
@@ -263,9 +305,13 @@ async def test_concurrent_callers_share_one_refresh() -> None:
     session.post = MagicMock(return_value=refresh)
 
     persisted: list[TokenPair] = []
-    async def _cb(p): persisted.append(p)
+
+    async def _cb(p):
+        persisted.append(p)
+
     client = FuseEnergyApiClient(
-        session=session, device_id="dev",
+        session=session,
+        device_id="dev",
         tokens=TokenPair("AT_OLD", "RT_OLD"),
         on_tokens_refreshed=_cb,
     )

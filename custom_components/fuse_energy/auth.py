@@ -4,10 +4,16 @@ Stateless functions. Callers pass what's needed and persist what comes back.
 The module does NOT touch HA's config entry store — that's the config flow's
 and coordinator's job.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union
+
+import aiohttp
+
+from .const import FUSE_API_BASE_URL, FUSE_WEB_APP_VERSION, FUSE_WEB_BASE_URL
+
+_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
 
 class FuseEnergyAuthError(Exception):
@@ -31,9 +37,9 @@ class TokenPair:
 
 @dataclass(frozen=True, slots=True)
 class Question:
-    key: str    # e.g. "DATE_OF_BIRTH"
+    key: str  # e.g. "DATE_OF_BIRTH"
     title: str  # display label served by Fuse
-    type: str   # "DATE" | "TEXT" (server-defined; treat unknowns as TEXT)
+    type: str  # "DATE" | "TEXT" (server-defined; treat unknowns as TEXT)
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,15 +55,7 @@ class AdditionalInfoResult:
     questions: list[Question]
 
 
-AuthStepResult = Union[AuthorizedResult, AdditionalInfoResult]
-
-
-import aiohttp
-
-from .const import FUSE_API_BASE_URL, FUSE_WEB_BASE_URL, FUSE_WEB_APP_VERSION
-
-
-_TIMEOUT = aiohttp.ClientTimeout(total=15)
+AuthStepResult = AuthorizedResult | AdditionalInfoResult
 
 
 async def _post_mobile_auth(
@@ -76,25 +74,31 @@ async def _post_mobile_auth(
     try:
         async with session.post(
             f"{FUSE_API_BASE_URL}/api/v3/auth",
-            json=body, headers=headers, timeout=_TIMEOUT,
+            json=body,
+            headers=headers,
+            timeout=_TIMEOUT,
         ) as r:
             payload = await r.json()
             if 200 <= r.status < 300:
                 return payload
-            if 500 <= r.status:
+            if r.status >= 500:
                 raise FuseEnergyAuthTransient(
                     f"server {r.status} from /api/v3/auth: {payload}"
                 )
             code = (payload or {}).get("status_string", "unknown")
             raise FuseEnergyAuthError(
-                f"HTTP {r.status}: {payload}", error_code=code,
+                f"HTTP {r.status}: {payload}",
+                error_code=code,
             )
     except aiohttp.ClientError as e:
         raise FuseEnergyAuthTransient(f"network: {e}") from e
 
 
 async def async_send_otp(
-    session: aiohttp.ClientSession, *, device_id: str, phone_number: str,
+    session: aiohttp.ClientSession,
+    *,
+    device_id: str,
+    phone_number: str,
 ) -> str:
     """Two API calls:
 
@@ -135,18 +139,19 @@ async def async_send_otp(
     try:
         async with session.post(
             f"{FUSE_WEB_BASE_URL}/api/trpc/phoneSignIn",
-            json={"phone": phone_number}, headers=headers, timeout=_TIMEOUT,
+            json={"phone": phone_number},
+            headers=headers,
+            timeout=_TIMEOUT,
         ) as r:
             if 200 <= r.status < 300:
                 return flow_token
-            if 500 <= r.status:
-                raise FuseEnergyAuthTransient(
-                    f"web phoneSignIn returned {r.status}"
-                )
+            if r.status >= 500:
+                raise FuseEnergyAuthTransient(f"web phoneSignIn returned {r.status}")
             payload = await r.json()
             code = (payload or {}).get("error", {}).get("code") or "dispatch_failed"
             raise FuseEnergyAuthError(
-                f"web phoneSignIn rejected: {payload}", error_code=str(code),
+                f"web phoneSignIn rejected: {payload}",
+                error_code=str(code),
             )
     except aiohttp.ClientError as e:
         raise FuseEnergyAuthTransient(f"network: {e}") from e
@@ -167,8 +172,9 @@ def _parse_challenge(payload: dict) -> AuthStepResult:
     if ct == "ADDITIONAL_INFO":
         data = payload.get("data") or {}
         questions = [
-            Question(key=q["key"], title=q.get("title", q["key"]),
-                     type=q.get("type", "TEXT"))
+            Question(
+                key=q["key"], title=q.get("title", q["key"]), type=q.get("type", "TEXT")
+            )
             for q in (data.get("questions") or [])
         ]
         return AdditionalInfoResult(
@@ -178,13 +184,17 @@ def _parse_challenge(payload: dict) -> AuthStepResult:
             questions=questions,
         )
     raise FuseEnergyAuthError(
-        f"unexpected challenge_type: {ct!r}", error_code="unsupported_challenge",
+        f"unexpected challenge_type: {ct!r}",
+        error_code="unsupported_challenge",
     )
 
 
 async def async_verify_otp(
-    session: aiohttp.ClientSession, *,
-    device_id: str, auth_flow_token: str, code: str,
+    session: aiohttp.ClientSession,
+    *,
+    device_id: str,
+    auth_flow_token: str,
+    code: str,
 ) -> AuthStepResult:
     """POST /api/v3/auth PHONE_OTP with Authorization: Bearer <auth_flow_token>.
 
@@ -201,8 +211,11 @@ async def async_verify_otp(
 
 
 async def async_submit_additional_info(
-    session: aiohttp.ClientSession, *,
-    device_id: str, auth_flow_token: str, responses: dict[str, str],
+    session: aiohttp.ClientSession,
+    *,
+    device_id: str,
+    auth_flow_token: str,
+    responses: dict[str, str],
 ) -> AuthStepResult:
     """POST /api/v3/auth ADDITIONAL_INFO. Same carriage as async_verify_otp.
 
@@ -218,8 +231,10 @@ async def async_submit_additional_info(
 
 
 async def async_refresh(
-    session: aiohttp.ClientSession, *,
-    device_id: str, tokens: TokenPair,
+    session: aiohttp.ClientSession,
+    *,
+    device_id: str,
+    tokens: TokenPair,
 ) -> TokenPair:
     """POST /api/v1/auth/refresh.
 
@@ -240,7 +255,9 @@ async def async_refresh(
     try:
         async with session.post(
             f"{FUSE_API_BASE_URL}/api/v1/auth/refresh",
-            json=body, headers=headers, timeout=_TIMEOUT,
+            json=body,
+            headers=headers,
+            timeout=_TIMEOUT,
         ) as r:
             if 200 <= r.status < 300:
                 payload = await r.json()
@@ -248,7 +265,7 @@ async def async_refresh(
                     access_token=payload["access_token"],
                     refresh_token=payload["refresh_token"],
                 )
-            if 500 <= r.status:
+            if r.status >= 500:
                 raise FuseEnergyAuthTransient(
                     f"server {r.status} from /api/v1/auth/refresh"
                 )

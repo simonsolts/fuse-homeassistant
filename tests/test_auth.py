@@ -1,6 +1,13 @@
 """Tests for the Fuse Energy auth module."""
+
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
+import aiohttp
+import pytest
+
+from custom_components.fuse_energy import auth as auth_mod
 from custom_components.fuse_energy.auth import (
     AdditionalInfoResult,
     AuthorizedResult,
@@ -48,14 +55,6 @@ def test_exception_hierarchy() -> None:
     assert issubclass(FuseEnergyAuthTransient, Exception)
 
 
-import pytest
-from unittest.mock import AsyncMock, MagicMock, call
-
-import aiohttp
-
-from custom_components.fuse_energy import auth as auth_mod
-
-
 def _resp(status: int, json_body):
     """Build an aiohttp-style async-context-manager response mock."""
     resp = MagicMock()
@@ -75,16 +74,21 @@ def _session_with_posts(*responses):
 
 
 async def test_send_otp_returns_flow_token_from_mobile_initial() -> None:
-    mobile_resp = _resp(200, {
-        "auth_flow_token": "FLOW_JWT",
-        "challenge_type": "PHONE_OTP",
-        "data": {"phone_number": "+447777"},
-    })
+    mobile_resp = _resp(
+        200,
+        {
+            "auth_flow_token": "FLOW_JWT",
+            "challenge_type": "PHONE_OTP",
+            "data": {"phone_number": "+447777"},
+        },
+    )
     web_resp = _resp(200, {"result": {"data": {"challenge_type": "PHONE_OTP"}}})
     session = _session_with_posts(mobile_resp, web_resp)
 
     token = await auth_mod.async_send_otp(
-        session, device_id="dev-1", phone_number="+447777",
+        session,
+        device_id="dev-1",
+        phone_number="+447777",
     )
 
     assert token == "FLOW_JWT"
@@ -134,18 +138,25 @@ async def test_send_otp_raises_transient_on_web_dispatch_failure() -> None:
 
 
 async def test_verify_otp_returns_authorized_result() -> None:
-    resp = _resp(200, {
-        "auth_flow_token": "FLOW",
-        "challenge_type": "AUTHORIZED",
-        "data": {
-            "access_token": "AT", "refresh_token": "RT",
-            "is_new_user_created": False,
+    resp = _resp(
+        200,
+        {
+            "auth_flow_token": "FLOW",
+            "challenge_type": "AUTHORIZED",
+            "data": {
+                "access_token": "AT",
+                "refresh_token": "RT",
+                "is_new_user_created": False,
+            },
         },
-    })
+    )
     session = _session_with_posts(resp)
 
     result = await auth_mod.async_verify_otp(
-        session, device_id="d", auth_flow_token="FLOW_IN", code="123456",
+        session,
+        device_id="d",
+        auth_flow_token="FLOW_IN",
+        code="123456",
     )
 
     assert isinstance(result, auth_mod.AuthorizedResult)
@@ -163,21 +174,27 @@ async def test_verify_otp_returns_authorized_result() -> None:
 
 
 async def test_verify_otp_returns_additional_info_result() -> None:
-    resp = _resp(200, {
-        "auth_flow_token": "FLOW_NEW",
-        "challenge_type": "ADDITIONAL_INFO",
-        "data": {
-            "title": "Verify your date of birth",
-            "subtitle": "Let's make sure this is the right account",
-            "questions": [
-                {"key": "DATE_OF_BIRTH", "title": "Date of birth", "type": "DATE"},
-            ],
+    resp = _resp(
+        200,
+        {
+            "auth_flow_token": "FLOW_NEW",
+            "challenge_type": "ADDITIONAL_INFO",
+            "data": {
+                "title": "Verify your date of birth",
+                "subtitle": "Let's make sure this is the right account",
+                "questions": [
+                    {"key": "DATE_OF_BIRTH", "title": "Date of birth", "type": "DATE"},
+                ],
+            },
         },
-    })
+    )
     session = _session_with_posts(resp)
 
     result = await auth_mod.async_verify_otp(
-        session, device_id="d", auth_flow_token="FLOW_IN", code="123456",
+        session,
+        device_id="d",
+        auth_flow_token="FLOW_IN",
+        code="123456",
     )
 
     assert isinstance(result, auth_mod.AdditionalInfoResult)
@@ -193,7 +210,10 @@ async def test_verify_otp_raises_on_wrong_code() -> None:
     session = _session_with_posts(resp)
     with pytest.raises(auth_mod.FuseEnergyAuthError) as ei:
         await auth_mod.async_verify_otp(
-            session, device_id="d", auth_flow_token="F", code="000000",
+            session,
+            device_id="d",
+            auth_flow_token="F",
+            code="000000",
         )
     assert ei.value.error_code == "invalid_code"
 
@@ -203,30 +223,39 @@ async def test_verify_otp_raises_transient_on_5xx() -> None:
     session = _session_with_posts(resp)
     with pytest.raises(auth_mod.FuseEnergyAuthTransient):
         await auth_mod.async_verify_otp(
-            session, device_id="d", auth_flow_token="F", code="000000",
+            session,
+            device_id="d",
+            auth_flow_token="F",
+            code="000000",
         )
 
 
 async def test_submit_additional_info_returns_authorized() -> None:
-    resp = _resp(200, {
-        "auth_flow_token": "FLOW",
-        "challenge_type": "AUTHORIZED",
-        "data": {
-            "access_token": "AT2", "refresh_token": "RT2",
-            "is_new_user_created": False,
+    resp = _resp(
+        200,
+        {
+            "auth_flow_token": "FLOW",
+            "challenge_type": "AUTHORIZED",
+            "data": {
+                "access_token": "AT2",
+                "refresh_token": "RT2",
+                "is_new_user_created": False,
+            },
         },
-    })
+    )
     session = _session_with_posts(resp)
 
     result = await auth_mod.async_submit_additional_info(
-        session, device_id="d", auth_flow_token="FLOW_IN",
+        session,
+        device_id="d",
+        auth_flow_token="FLOW_IN",
         responses={"DATE_OF_BIRTH": "1990-06-20"},
     )
 
     assert isinstance(result, auth_mod.AuthorizedResult)
     assert result.tokens.access_token == "AT2"
 
-    args, kwargs = session.post.call_args_list[0]
+    _args, kwargs = session.post.call_args_list[0]
     assert kwargs["json"] == {
         "challenge_type": "ADDITIONAL_INFO",
         "data": {"responses": {"DATE_OF_BIRTH": "1990-06-20"}},
@@ -235,18 +264,24 @@ async def test_submit_additional_info_returns_authorized() -> None:
 
 
 async def test_submit_additional_info_returns_chained_questions() -> None:
-    resp = _resp(200, {
-        "auth_flow_token": "FLOW2",
-        "challenge_type": "ADDITIONAL_INFO",
-        "data": {
-            "title": "Step 2",
-            "subtitle": "more",
-            "questions": [{"key": "X", "title": "x", "type": "TEXT"}],
+    resp = _resp(
+        200,
+        {
+            "auth_flow_token": "FLOW2",
+            "challenge_type": "ADDITIONAL_INFO",
+            "data": {
+                "title": "Step 2",
+                "subtitle": "more",
+                "questions": [{"key": "X", "title": "x", "type": "TEXT"}],
+            },
         },
-    })
+    )
     session = _session_with_posts(resp)
     result = await auth_mod.async_submit_additional_info(
-        session, device_id="d", auth_flow_token="F", responses={"Y": "z"},
+        session,
+        device_id="d",
+        auth_flow_token="F",
+        responses={"Y": "z"},
     )
     assert isinstance(result, auth_mod.AdditionalInfoResult)
     assert result.auth_flow_token == "FLOW2"
@@ -258,16 +293,22 @@ async def test_submit_additional_info_raises_on_mismatch() -> None:
     session = _session_with_posts(resp)
     with pytest.raises(auth_mod.FuseEnergyAuthError) as ei:
         await auth_mod.async_submit_additional_info(
-            session, device_id="d", auth_flow_token="F", responses={"DOB": "x"},
+            session,
+            device_id="d",
+            auth_flow_token="F",
+            responses={"DOB": "x"},
         )
     assert ei.value.error_code == "additional_info_mismatch"
 
 
 async def test_refresh_rotates_both_tokens() -> None:
-    resp = _resp(200, {
-        "access_token": "AT_NEW",
-        "refresh_token": "RT_NEW",
-    })
+    resp = _resp(
+        200,
+        {
+            "access_token": "AT_NEW",
+            "refresh_token": "RT_NEW",
+        },
+    )
     session = _session_with_posts(resp)
 
     new_pair = await auth_mod.async_refresh(
@@ -294,7 +335,8 @@ async def test_refresh_raises_auth_error_on_401() -> None:
     session = _session_with_posts(resp)
     with pytest.raises(auth_mod.FuseEnergyAuthError):
         await auth_mod.async_refresh(
-            session, device_id="d",
+            session,
+            device_id="d",
             tokens=auth_mod.TokenPair("AT", "RT"),
         )
 
@@ -304,6 +346,7 @@ async def test_refresh_raises_transient_on_5xx() -> None:
     session = _session_with_posts(resp)
     with pytest.raises(auth_mod.FuseEnergyAuthTransient):
         await auth_mod.async_refresh(
-            session, device_id="d",
+            session,
+            device_id="d",
             tokens=auth_mod.TokenPair("AT", "RT"),
         )

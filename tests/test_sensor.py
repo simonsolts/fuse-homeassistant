@@ -1,4 +1,5 @@
 """Tests for fuse_energy sensor entities."""
+
 from __future__ import annotations
 
 from unittest.mock import AsyncMock
@@ -18,7 +19,9 @@ from custom_components.fuse_energy.sensor import (
 )
 
 
-async def _coord(hass: HomeAssistant, snap: FuseEnergySnapshot | None) -> FuseEnergyDataUpdateCoordinator:
+async def _coord(
+    hass: HomeAssistant, snap: FuseEnergySnapshot | None
+) -> FuseEnergyDataUpdateCoordinator:
     client = AsyncMock(spec=FuseEnergyApiClient)
     coord = FuseEnergyDataUpdateCoordinator(hass, client, premises_fid="pfid")
     coord.data = snap
@@ -69,7 +72,8 @@ async def test_sensors_unavailable_when_snapshot_is_none(hass: HomeAssistant) ->
 
 async def test_sensors_unavailable_after_failed_update(hass: HomeAssistant) -> None:
     snap = FuseEnergySnapshot(
-        last_hour_kwh=0.5, last_hour_cost_gbp=0.1,
+        last_hour_kwh=0.5,
+        last_hour_cost_gbp=0.1,
     )
     coord = await _coord(hass, snap)
     coord.last_update_success = False

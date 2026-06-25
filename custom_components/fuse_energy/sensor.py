@@ -7,6 +7,7 @@ don't want HA to auto-generate statistics from these display sensors.
 HA also rejects ``MEASUREMENT`` paired with the ``energy`` /
 ``monetary`` device classes.
 """
+
 from __future__ import annotations
 
 from homeassistant.components.sensor import (

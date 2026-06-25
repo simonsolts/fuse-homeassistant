@@ -5,17 +5,18 @@ Phone-OTP three-step flow:
 
 Reauth re-runs the same chain via async_step_reauth.
 """
+
 from __future__ import annotations
 
 import logging
 import re
-import uuid
 from typing import Any
+import uuid
 
-import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.helpers import aiohttp_client
+import voluptuous as vol
 
 from . import auth as auth_mod
 from .api import FuseEnergyApiClient
@@ -37,9 +38,7 @@ _LOGGER = logging.getLogger(__name__)
 _UNIQUE_ID = "fuse_energy_singleton"
 _E164 = re.compile(r"^\+[1-9]\d{1,14}$")
 
-_USER_SCHEMA = vol.Schema(
-    {vol.Required(CONF_PHONE_NUMBER): str}
-)
+_USER_SCHEMA = vol.Schema({vol.Required(CONF_PHONE_NUMBER): str})
 
 
 class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -57,7 +56,8 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         self._reauth_entry: config_entries.ConfigEntry | None = None
 
     async def async_step_reauth(
-        self, entry_data: dict[str, Any],
+        self,
+        entry_data: dict[str, Any],
     ) -> FlowResult:
         """Entry point HA calls when the coordinator raises
         ConfigEntryAuthFailed. We re-run async_step_user but mark the flow
@@ -68,7 +68,8 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return await self.async_step_user()
 
     async def async_step_user(
-        self, user_input: dict[str, Any] | None = None,
+        self,
+        user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
         if self._async_current_entries() and self._reauth_entry is None:
             return self.async_abort(reason="single_instance_allowed")
@@ -91,7 +92,9 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 )
                 try:
                     token = await auth_mod.async_send_otp(
-                        session, device_id=device_id, phone_number=phone,
+                        session,
+                        device_id=device_id,
+                        phone_number=phone,
                     )
                 except auth_mod.FuseEnergyAuthError as e:
                     errors["base"] = e.error_code
@@ -104,13 +107,16 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                     return await self.async_step_otp()
 
         return self.async_show_form(
-            step_id="user", data_schema=_USER_SCHEMA, errors=errors,
+            step_id="user",
+            data_schema=_USER_SCHEMA,
+            errors=errors,
         )
 
     _OTP_SCHEMA = vol.Schema({vol.Required("verification_code"): str})
 
     async def async_step_otp(
-        self, user_input: dict[str, Any] | None = None,
+        self,
+        user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
         errors: dict[str, str] = {}
         if user_input is not None:
@@ -177,14 +183,16 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
         if self._reauth_entry is not None:
             return self.async_update_reload_and_abort(
-                self._reauth_entry, data=data,
+                self._reauth_entry,
+                data=data,
                 reason="reauth_successful",
             )
 
         return self.async_create_entry(title="Fuse Energy", data=data)
 
     async def async_step_additional_info(
-        self, user_input: dict[str, Any] | None = None,
+        self,
+        user_input: dict[str, Any] | None = None,
     ) -> FlowResult:
         from homeassistant.helpers import selector
 
@@ -232,8 +240,10 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 if q.type != "TEXT":
                     _LOGGER.warning(
-                        "unknown additional-info question type %r for key %r; rendering as text",
-                        q.type, q.key,
+                        "unknown additional-info question type %r for key %r; "
+                        "rendering as text",
+                        q.type,
+                        q.key,
                     )
                 fields[vol.Required(q.key)] = str
 
