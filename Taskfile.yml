@@ -34,3 +34,30 @@ tasks:
     desc: Format the code with ruff
     cmds:
       - uv run --group lint ruff format .
+
+  bump-version:
+    desc: Bump the patch version in pyproject.toml & manifest.json, then relock uv
+    cmds:
+      - |
+        uv run python - <<'PY'
+        import pathlib
+        import re
+
+        pyproject = pathlib.Path("pyproject.toml")
+        manifest = pathlib.Path("custom_components/fuse_energy/manifest.json")
+
+        text = pyproject.read_text()
+        match = re.search(r'^version = "(\d+)\.(\d+)\.(\d+)"', text, re.M)
+        if match is None:
+            raise SystemExit("Could not find version in pyproject.toml")
+        major, minor, patch = (int(part) for part in match.groups())
+        old = f"{major}.{minor}.{patch}"
+        new = f"{major}.{minor}.{patch + 1}"
+
+        pyproject.write_text(text.replace(f'version = "{old}"', f'version = "{new}"', 1))
+        manifest.write_text(
+            manifest.read_text().replace(f'"version": "{old}"', f'"version": "{new}"', 1)
+        )
+        print(f"Bumped version {old} -> {new}")
+        PY
+      - uv lock
