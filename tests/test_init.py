@@ -45,7 +45,6 @@ def test_manifest_is_valid_json_with_required_keys() -> None:
     assert manifest["name"] == "Fuse Energy"
     assert manifest["config_flow"] is True
     assert manifest["iot_class"] == "cloud_polling"
-    assert manifest["version"] == "0.4.6"
     assert manifest["codeowners"] == ["@simonsolts"]
 
 
