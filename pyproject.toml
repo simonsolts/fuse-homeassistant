@@ -1,11 +1,20 @@
 [project]
 name = "fuse-energy-homeassistant"
-version = "0.4.5"
+version = "0.4.6"
 description = "Home Assistant custom integration for Fuse Energy (UK)."
 requires-python = ">=3.12"
 dependencies = []
+authors = [
+	{name = "Simon Solts", email = "simonsolts@users.noreply.github.com"}
+]
+license = "AGPL-3.0-only"
+license-files = ["LICENSE"]
 
-[project.optional-dependencies]
+[project.urls]
+Homepage = "https://github.com/simonsolts/fuse-homeassistant"
+Repository = "https://github.com/simonsolts/fuse-homeassistant"
+
+[dependency-groups]
 test = [
     "pytest",
     "pytest-asyncio",

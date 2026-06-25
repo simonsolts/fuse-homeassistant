@@ -1,10 +1,14 @@
 {
   "domain": "fuse_energy",
   "name": "Fuse Energy",
-  "codeowners": [],
+  "codeowners": [
+    "@simonsolts"
+  ],
   "config_flow": true,
   "dependencies": [],
+  "documentation": "https://github.com/simonsolts/fuse-homeassistantd",
+  "issue_tracker": "https://github.com/simonsolts/fuse-homeassistant/issues",
   "iot_class": "cloud_polling",
   "requirements": [],
-  "version": "0.4.5"
+  "version": "0.4.6"
 }
