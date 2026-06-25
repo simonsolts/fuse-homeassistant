@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from unittest.mock import AsyncMock, MagicMock
+
+import aiohttp
+import pytest
+
+from custom_components.fuse_energy import auth as auth_mod
 from custom_components.fuse_energy.auth import (
     AdditionalInfoResult,
     AuthorizedResult,
@@ -47,14 +53,6 @@ def test_auth_error_carries_error_code() -> None:
 def test_exception_hierarchy() -> None:
     assert issubclass(FuseEnergyAuthError, Exception)
     assert issubclass(FuseEnergyAuthTransient, Exception)
-
-
-from unittest.mock import AsyncMock, MagicMock
-
-import aiohttp
-import pytest
-
-from custom_components.fuse_energy import auth as auth_mod
 
 
 def _resp(status: int, json_body):
@@ -257,7 +255,7 @@ async def test_submit_additional_info_returns_authorized() -> None:
     assert isinstance(result, auth_mod.AuthorizedResult)
     assert result.tokens.access_token == "AT2"
 
-    args, kwargs = session.post.call_args_list[0]
+    _args, kwargs = session.post.call_args_list[0]
     assert kwargs["json"] == {
         "challenge_type": "ADDITIONAL_INFO",
         "data": {"responses": {"DATE_OF_BIRTH": "1990-06-20"}},

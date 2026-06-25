@@ -8,7 +8,12 @@ and coordinator's job.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Union
+
+import aiohttp
+
+from .const import FUSE_API_BASE_URL, FUSE_WEB_APP_VERSION, FUSE_WEB_BASE_URL
+
+_TIMEOUT = aiohttp.ClientTimeout(total=15)
 
 
 class FuseEnergyAuthError(Exception):
@@ -50,14 +55,7 @@ class AdditionalInfoResult:
     questions: list[Question]
 
 
-AuthStepResult = Union[AuthorizedResult, AdditionalInfoResult]
-
-
-import aiohttp
-
-from .const import FUSE_API_BASE_URL, FUSE_WEB_APP_VERSION, FUSE_WEB_BASE_URL
-
-_TIMEOUT = aiohttp.ClientTimeout(total=15)
+AuthStepResult = AuthorizedResult | AdditionalInfoResult
 
 
 async def _post_mobile_auth(

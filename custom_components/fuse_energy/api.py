@@ -186,7 +186,8 @@ class FuseEnergyApiClient:
         """GET /api/v2/customer/premises.
 
         Response shape:
-          [{"premises": {"id": "<uuid>", ...}, "supplies": [...], "default_date_uk": "..."}, ...]
+          [{"premises": {"id": "<uuid>", ...}, "supplies": [...],
+            "default_date_uk": "..."}, ...]
         """
         data = await self._get("/api/v2/customer/premises")
         if not isinstance(data, list):
@@ -209,7 +210,7 @@ class FuseEnergyApiClient:
 
         Response shape (flat — no tRPC wrapping):
           {"current_index": {...}, "supplies": [{"supply_fid", "supply_type",
-                                                  "bars": [{"bar": {...}, "breakdown": [...]}]}, ...]}
+            "bars": [{"bar": {...}, "breakdown": [...]}]}, ...]}
         """
         data = await self._get(
             f"/api/v1/premises/{premises_fid}/chart",

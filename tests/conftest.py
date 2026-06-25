@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import contextlib
 from pathlib import Path
 
 import pytest
@@ -40,10 +41,8 @@ def enable_custom_integrations(enable_custom_integrations):
         yield
     finally:
         if added:
-            try:
+            with contextlib.suppress(ValueError):
                 custom_components.__path__.remove(project_path)
-            except ValueError:
-                pass
 
 
 @pytest.fixture

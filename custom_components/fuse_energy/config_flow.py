@@ -240,7 +240,8 @@ class FuseEnergyConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             else:
                 if q.type != "TEXT":
                     _LOGGER.warning(
-                        "unknown additional-info question type %r for key %r; rendering as text",
+                        "unknown additional-info question type %r for key %r; "
+                        "rendering as text",
                         q.type,
                         q.key,
                     )
